@@ -7,7 +7,7 @@ import "@/styles/shadcn.css";
 import "@/styles/tailwind.css";
 
 export const metadata: Metadata = {
-  title: "Marketa+ - Market Analysis & Alerts",
+  title: "Marketa+ - Market analysis & alerts",
   description: "Market analysis, chart alerts, and persistent monitoring.",
 };
 

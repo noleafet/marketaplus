@@ -110,7 +110,7 @@ function SidebarBody({
               Marketa+
             </span>
             <span className="block truncate text-[11px] leading-tight text-muted-foreground">
-              Market analysis
+              Market analysis & alerts
             </span>
           </span>
         </a>
