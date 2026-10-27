@@ -1,0 +1,1618 @@
+openapi: 3.0.3
+info:
+  title: TradeChartAlerts API
+  version: 1.0.0
+  description: |-
+    Market data, alerting, Telegram and engine-control endpoints for the TradeChartAlerts dashboard.
+
+    Interactive docs: `/api/docs/` (Swagger UI) and `/api/redoc/`. The machine-readable schema is served at `/api/schema/`.
+paths:
+  /api/alerts/:
+    get:
+      operationId: api_alerts_list
+      tags:
+      - api
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Alert'
+          description: ''
+    post:
+      operationId: api_alerts_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AlertRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AlertRequest'
+        required: true
+      security:
+      - {}
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+          description: ''
+  /api/alerts/{id}/:
+    get:
+      operationId: api_alerts_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+          description: ''
+    put:
+      operationId: api_alerts_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AlertRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AlertRequest'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+          description: ''
+    patch:
+      operationId: api_alerts_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedAlertRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedAlertRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedAlertRequest'
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+          description: ''
+    delete:
+      operationId: api_alerts_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - {}
+      responses:
+        '204':
+          description: No response body
+  /api/engine/jobs/:
+    get:
+      operationId: api_engine_jobs_list
+      description: Keys accepted by POST /api/engine/run/.
+      summary: List engine jobs
+      tags:
+      - engine
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EngineJob'
+          description: ''
+  /api/engine/run/:
+    post:
+      operationId: api_engine_run_create
+      description: Runs one scheduler polling job immediately and returns the text
+        it would have written to stdout. Price, MACD, EMA and event checks call the
+        exchange and CoinMarketCal APIs, so the request can take a while.
+      summary: Run an engine job now
+      tags:
+      - engine
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EngineRunRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/EngineRunRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EngineRunRequestRequest'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngineRunResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+          description: Unknown job or invalid options.
+  /api/events/:
+    get:
+      operationId: api_events_list
+      tags:
+      - api
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TriggerEvent'
+          description: ''
+  /api/exchange/:
+    get:
+      operationId: api_exchange_retrieve
+      summary: Read the configured exchange
+      tags:
+      - market
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExchangeSelectionResponse'
+          description: ''
+    post:
+      operationId: api_exchange_create
+      summary: Switch the exchange
+      tags:
+      - market
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExchangeSelectionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ExchangeSelectionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ExchangeSelectionRequest'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExchangeSelectionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+          description: ''
+  /api/health/:
+    get:
+      operationId: api_health_retrieve
+      summary: Liveness probe
+      tags:
+      - system
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+          description: ''
+  /api/market/candles/:
+    get:
+      operationId: api_market_candles_list
+      summary: OHLCV candles
+      parameters:
+      - in: query
+        name: interval
+        schema:
+          type: string
+        description: One of 1m, 5m, 15m, 1h, 4h, 1d, 1w.
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Candles to return, 2 to 1000.
+      - in: query
+        name: symbol
+        schema:
+          type: string
+        description: Market symbol.
+        required: true
+      tags:
+      - market
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MarketCandle'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+          description: ''
+        '502':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+          description: ''
+  /api/market/events/:
+    get:
+      operationId: api_market_events_list
+      description: Events stored for one watchlist symbol, soonest first.
+      summary: Market events for a symbol
+      parameters:
+      - in: query
+        name: symbol
+        schema:
+          type: string
+        description: Watchlist symbol.
+        required: true
+      tags:
+      - market
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MarketEvent'
+          description: ''
+  /api/market/quote/:
+    get:
+      operationId: api_market_quote_retrieve
+      summary: Latest price quote
+      parameters:
+      - in: query
+        name: symbol
+        schema:
+          type: string
+        description: Market symbol, e.g. BTCUSDT.
+        required: true
+      tags:
+      - market
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketQuote'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+          description: ''
+        '502':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+          description: ''
+  /api/pattern-shots/:
+    get:
+      operationId: api_pattern_shots_list
+      tags:
+      - api
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PatternShot'
+          description: ''
+    post:
+      operationId: api_pattern_shots_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatternShotRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatternShotRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatternShotRequest'
+        required: true
+      security:
+      - {}
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatternShot'
+          description: ''
+    delete:
+      operationId: pattern_shots_clear
+      summary: Clear a symbol's pictures
+      parameters:
+      - in: query
+        name: category
+        schema:
+          type: string
+        description: chart or candlestick.
+      - in: query
+        name: symbol
+        schema:
+          type: string
+        description: Symbol to clear.
+        required: true
+      tags:
+      - pattern-shots
+      security:
+      - {}
+      responses:
+        '200':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+          description: ''
+  /api/pattern-shots/{id}/:
+    get:
+      operationId: api_pattern_shots_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatternShot'
+          description: ''
+    delete:
+      operationId: api_pattern_shots_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - {}
+      responses:
+        '204':
+          description: No response body
+  /api/pattern-shots/{id}/image/:
+    get:
+      operationId: api_pattern_shots_image_retrieve
+      summary: Picture bytes
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - pattern-shots
+      security:
+      - {}
+      responses:
+        '200':
+          description: PNG bytes.
+        '404':
+          description: No response body
+  /api/telegram/csrf/:
+    get:
+      operationId: api_telegram_csrf_retrieve
+      description: Sets the csrftoken cookie and returns the same token in the body.
+      summary: Fetch a CSRF token for the Telegram helpers
+      tags:
+      - telegram
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Csrf'
+          description: ''
+  /api/telegram/find-chat/:
+    post:
+      operationId: api_telegram_find_chat_create
+      description: Calls Telegram getUpdates with the supplied bot token and returns
+        the chat id of the most recent message so it can be stored on a notification.
+      summary: Find the Telegram chat id
+      tags:
+      - telegram
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelegramFindChatRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TelegramFindChatRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TelegramFindChatRequest'
+        required: true
+      security:
+      - csrfSession: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelegramFindChatResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+          description: Telegram rejected the token.
+        '502':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+          description: Telegram could not be reached.
+  /api/telegram/status/:
+    get:
+      operationId: api_telegram_status_retrieve
+      summary: Telegram notification status
+      tags:
+      - telegram
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelegramStatus'
+          description: ''
+  /api/telegram/test/:
+    post:
+      operationId: api_telegram_test_create
+      summary: Send a Telegram test message
+      tags:
+      - telegram
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelegramTestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TelegramTestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TelegramTestRequest'
+        required: true
+      security:
+      - csrfSession: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+          description: Telegram rejected the request or token.
+        '502':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+          description: Telegram could not be reached.
+  /api/watchlist/:
+    get:
+      operationId: api_watchlist_list
+      summary: List watchlist symbols
+      tags:
+      - watchlist
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WatchlistSymbol'
+          description: ''
+    post:
+      operationId: api_watchlist_create
+      description: Adding a symbol also fetches its CoinMarketCal events immediately.
+      summary: Add a watchlist symbol
+      tags:
+      - watchlist
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WatchlistSymbolRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/WatchlistSymbolRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/WatchlistSymbolRequest'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WatchlistSymbol'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+          description: ''
+  /api/watchlist/{symbol}/:
+    delete:
+      operationId: api_watchlist_destroy
+      summary: Remove a watchlist symbol
+      parameters:
+      - in: path
+        name: symbol
+        schema:
+          type: string
+        required: true
+      tags:
+      - watchlist
+      security:
+      - {}
+      responses:
+        '204':
+          description: No response body
+        '404':
+          description: No response body
+  /api/watchlist/{symbol}/slug/:
+    post:
+      operationId: api_watchlist_slug_create
+      description: Looks up the canonical CoinMarketCal coin slug (for example `bitcoin`)
+        for a watchlist pair and stores it on the watchlist row. The events endpoint
+        wants slugs rather than tickers, because tickers collide across projects.
+      summary: Resolve a watchlist pair's CoinMarketCal slug
+      parameters:
+      - in: path
+        name: symbol
+        schema:
+          type: string
+        required: true
+      tags:
+      - watchlist
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WatchlistSlug'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+          description: ''
+        '502':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+          description: ''
+components:
+  schemas:
+    Alert:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        symbol:
+          type: string
+          maxLength: 24
+        kind:
+          $ref: '#/components/schemas/KindEnum'
+        condition:
+          $ref: '#/components/schemas/ConditionEnum'
+        price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,18}(?:\.\d{0,12})?$
+          nullable: true
+        timeframe:
+          type: string
+          maxLength: 3
+        rsi_timeframe:
+          type: string
+          description: Timeframe for the RSI context; blank follows the MACD timeframe
+          maxLength: 3
+        trend_timeframe:
+          type: string
+          description: Timeframe for the EMA trend context (defaults to 1h)
+          maxLength: 3
+        note:
+          type: string
+          maxLength: 240
+        frequency:
+          $ref: '#/components/schemas/FrequencyEnum'
+        active:
+          type: boolean
+        cooldown_seconds:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        line_type:
+          oneOf:
+          - $ref: '#/components/schemas/LineTypeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        line_t1:
+          type: string
+          format: date-time
+          nullable: true
+        line_price1:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,18}(?:\.\d{0,12})?$
+          nullable: true
+        line_t2:
+          type: string
+          format: date-time
+          nullable: true
+        line_price2:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,18}(?:\.\d{0,12})?$
+          nullable: true
+        line_extend:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        last_triggered_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        rsi_period:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+        rsi_oversold:
+          type: number
+          format: double
+          nullable: true
+        rsi_overbought:
+          type: number
+          format: double
+          nullable: true
+        last_rsi_value:
+          type: number
+          format: double
+          readOnly: true
+          nullable: true
+        macd_threshold_5:
+          type: boolean
+          description: Enable 5% MACD cross approach threshold
+        macd_threshold_10:
+          type: boolean
+          description: Enable 10% MACD cross approach threshold
+        rsi_enabled:
+          type: boolean
+          description: Enable RSI context by default
+        macd_triggered:
+          type: boolean
+          readOnly: true
+          description: Track if MACD has triggered for cascading RSI alert
+        trend_enabled:
+          type: boolean
+          description: Enable EMA trend context by default
+        trend_period:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+          description: EMA period for the trend filter (defaults to the 100 EMA)
+        ema_period:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          description: EMA period for EMA cross alerts (100 or 200)
+        macd_context_enabled:
+          type: boolean
+          description: Include MACD trend context in EMA cross alerts
+        macd_context_timeframe:
+          type: string
+          description: Timeframe for the MACD trend context (defaults to 1h)
+          maxLength: 3
+        prediction_stage_a:
+          type: boolean
+          description: Enable the potential-move early warning
+        prediction_stage_b:
+          type: boolean
+          description: Enable the confirmed-breakout alert
+        prediction_a_armed:
+          type: boolean
+          readOnly: true
+          description: 'Internal state: strict stage A waits for a fresh setup'
+        prediction_a_early_armed:
+          type: boolean
+          readOnly: true
+          description: 'Internal state: relaxed stage A waits for a fresh setup'
+      required:
+      - condition
+      - created_at
+      - id
+      - last_rsi_value
+      - last_triggered_at
+      - macd_triggered
+      - prediction_a_armed
+      - prediction_a_early_armed
+      - symbol
+      - updated_at
+    AlertRequest:
+      type: object
+      properties:
+        symbol:
+          type: string
+          minLength: 1
+          maxLength: 24
+        kind:
+          $ref: '#/components/schemas/KindEnum'
+        condition:
+          $ref: '#/components/schemas/ConditionEnum'
+        price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,18}(?:\.\d{0,12})?$
+          nullable: true
+        timeframe:
+          type: string
+          maxLength: 3
+        rsi_timeframe:
+          type: string
+          description: Timeframe for the RSI context; blank follows the MACD timeframe
+          maxLength: 3
+        trend_timeframe:
+          type: string
+          description: Timeframe for the EMA trend context (defaults to 1h)
+          maxLength: 3
+        note:
+          type: string
+          maxLength: 240
+        frequency:
+          $ref: '#/components/schemas/FrequencyEnum'
+        active:
+          type: boolean
+        cooldown_seconds:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        line_type:
+          oneOf:
+          - $ref: '#/components/schemas/LineTypeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        line_t1:
+          type: string
+          format: date-time
+          nullable: true
+        line_price1:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,18}(?:\.\d{0,12})?$
+          nullable: true
+        line_t2:
+          type: string
+          format: date-time
+          nullable: true
+        line_price2:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,18}(?:\.\d{0,12})?$
+          nullable: true
+        line_extend:
+          type: boolean
+        rsi_period:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+        rsi_oversold:
+          type: number
+          format: double
+          nullable: true
+        rsi_overbought:
+          type: number
+          format: double
+          nullable: true
+        macd_threshold_5:
+          type: boolean
+          description: Enable 5% MACD cross approach threshold
+        macd_threshold_10:
+          type: boolean
+          description: Enable 10% MACD cross approach threshold
+        rsi_enabled:
+          type: boolean
+          description: Enable RSI context by default
+        trend_enabled:
+          type: boolean
+          description: Enable EMA trend context by default
+        trend_period:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+          description: EMA period for the trend filter (defaults to the 100 EMA)
+        ema_period:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          description: EMA period for EMA cross alerts (100 or 200)
+        macd_context_enabled:
+          type: boolean
+          description: Include MACD trend context in EMA cross alerts
+        macd_context_timeframe:
+          type: string
+          description: Timeframe for the MACD trend context (defaults to 1h)
+          maxLength: 3
+        prediction_stage_a:
+          type: boolean
+          description: Enable the potential-move early warning
+        prediction_stage_b:
+          type: boolean
+          description: Enable the confirmed-breakout alert
+      required:
+      - condition
+      - symbol
+    BlankEnum:
+      enum:
+      - ''
+    CategoryEnum:
+      enum:
+      - chart
+      - candlestick
+      type: string
+      description: |-
+        * `chart` - Chart pattern
+        * `candlestick` - Candlestick pattern
+    ConditionEnum:
+      enum:
+      - cross_up
+      - cross_down
+      - cross
+      - above
+      - below
+      type: string
+      description: |-
+        * `cross_up` - Crosses above
+        * `cross_down` - Crosses below
+        * `cross` - Crosses either way
+        * `above` - Is above
+        * `below` - Is below
+    Csrf:
+      type: object
+      properties:
+        csrf_token:
+          type: string
+      required:
+      - csrf_token
+    Detail:
+      type: object
+      description: 'Shared shape for the ``{"detail": "..."}`` error responses.'
+      properties:
+        detail:
+          type: string
+      required:
+      - detail
+    EngineJob:
+      type: object
+      properties:
+        key:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+      required:
+      - description
+      - key
+      - title
+    EngineRunRequestRequest:
+      type: object
+      properties:
+        job:
+          allOf:
+          - $ref: '#/components/schemas/JobEnum'
+          description: |-
+            Which polling job to run now.
+
+            * `alerts` - alerts
+            * `events` - events
+            * `predictions` - predictions
+        history:
+          type: boolean
+          default: false
+          description: 'Events job only: also force the previous seven days'' high-impact
+            backfill.'
+        symbols:
+          type: array
+          items:
+            type: string
+            minLength: 1
+          description: 'Events job only: limit the sync to these watchlist symbols.'
+      required:
+      - job
+    EngineRunResponse:
+      type: object
+      properties:
+        job:
+          type: string
+        title:
+          type: string
+        output:
+          type: string
+          description: Stdout captured from the job while it ran.
+        triggered:
+          type: integer
+          description: Alert or prediction events fired. Always 0 for the events job.
+        summary:
+          type: object
+          additionalProperties: {}
+          description: CoinMarketCal sync summary, returned by the events job.
+      required:
+      - job
+      - output
+      - title
+    ExchangeEnum:
+      enum:
+      - binance
+      - bybit
+      type: string
+      description: |-
+        * `binance` - Binance
+        * `bybit` - Bybit
+    ExchangeSelectionRequest:
+      type: object
+      properties:
+        exchange:
+          $ref: '#/components/schemas/ExchangeEnum'
+      required:
+      - exchange
+    ExchangeSelectionResponse:
+      type: object
+      properties:
+        exchange:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+      required:
+      - exchange
+      - options
+    FrequencyEnum:
+      enum:
+      - once
+      - every
+      type: string
+      description: |-
+        * `once` - Once
+        * `every` - Every time
+    Health:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+      - status
+    ImpactEnum:
+      enum:
+      - low
+      - mid
+      - high
+      - critical
+      - unknown
+      type: string
+      description: |-
+        * `low` - Low
+        * `mid` - Mid
+        * `high` - High
+        * `critical` - Critical
+        * `unknown` - Unknown
+    JobEnum:
+      enum:
+      - alerts
+      - events
+      - predictions
+      type: string
+      description: |-
+        * `alerts` - alerts
+        * `events` - events
+        * `predictions` - predictions
+    KindEnum:
+      enum:
+      - price
+      - macd
+      - ema
+      - rsi
+      - prediction
+      type: string
+      description: |-
+        * `price` - Price
+        * `macd` - MACD cross
+        * `ema` - EMA cross
+        * `rsi` - RSI
+        * `prediction` - Two-stage prediction
+    LineTypeEnum:
+      enum:
+      - trend
+      - ray
+      - hline
+      - hray
+      type: string
+      description: |-
+        * `trend` - Trendline
+        * `ray` - Ray
+        * `hline` - Horizontal line
+        * `hray` - Horizontal ray
+    MarketCandle:
+      type: object
+      properties:
+        time:
+          type: integer
+          description: Candle open time, UTC seconds.
+        open:
+          type: number
+          format: double
+        high:
+          type: number
+          format: double
+        low:
+          type: number
+          format: double
+        close:
+          type: number
+          format: double
+        volume:
+          type: number
+          format: double
+      required:
+      - close
+      - high
+      - low
+      - open
+      - time
+      - volume
+    MarketEvent:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        external_id:
+          type: string
+          readOnly: true
+        symbol:
+          type: string
+          readOnly: true
+        coin_symbol:
+          type: string
+          readOnly: true
+        title:
+          type: string
+          readOnly: true
+        description:
+          type: string
+          readOnly: true
+        date:
+          type: string
+          format: date-time
+          readOnly: true
+        date_end:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        displayed_date:
+          type: string
+          readOnly: true
+        impact:
+          allOf:
+          - $ref: '#/components/schemas/ImpactEnum'
+          readOnly: true
+        impact_score:
+          type: number
+          format: double
+          readOnly: true
+          nullable: true
+        impact_summary:
+          type: string
+          readOnly: true
+        source_url:
+          type: string
+          format: uri
+          readOnly: true
+        categories:
+          readOnly: true
+        is_estimated:
+          type: boolean
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - categories
+      - coin_symbol
+      - date
+      - date_end
+      - description
+      - displayed_date
+      - external_id
+      - id
+      - impact
+      - impact_score
+      - impact_summary
+      - is_estimated
+      - source_url
+      - symbol
+      - title
+      - updated_at
+    MarketQuote:
+      type: object
+      properties:
+        price:
+          type: number
+          format: double
+        change:
+          type: number
+          format: double
+          description: 24h change, in percent.
+      required:
+      - change
+      - price
+    PatchedAlertRequest:
+      type: object
+      properties:
+        symbol:
+          type: string
+          minLength: 1
+          maxLength: 24
+        kind:
+          $ref: '#/components/schemas/KindEnum'
+        condition:
+          $ref: '#/components/schemas/ConditionEnum'
+        price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,18}(?:\.\d{0,12})?$
+          nullable: true
+        timeframe:
+          type: string
+          maxLength: 3
+        rsi_timeframe:
+          type: string
+          description: Timeframe for the RSI context; blank follows the MACD timeframe
+          maxLength: 3
+        trend_timeframe:
+          type: string
+          description: Timeframe for the EMA trend context (defaults to 1h)
+          maxLength: 3
+        note:
+          type: string
+          maxLength: 240
+        frequency:
+          $ref: '#/components/schemas/FrequencyEnum'
+        active:
+          type: boolean
+        cooldown_seconds:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        line_type:
+          oneOf:
+          - $ref: '#/components/schemas/LineTypeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        line_t1:
+          type: string
+          format: date-time
+          nullable: true
+        line_price1:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,18}(?:\.\d{0,12})?$
+          nullable: true
+        line_t2:
+          type: string
+          format: date-time
+          nullable: true
+        line_price2:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,18}(?:\.\d{0,12})?$
+          nullable: true
+        line_extend:
+          type: boolean
+        rsi_period:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+        rsi_oversold:
+          type: number
+          format: double
+          nullable: true
+        rsi_overbought:
+          type: number
+          format: double
+          nullable: true
+        macd_threshold_5:
+          type: boolean
+          description: Enable 5% MACD cross approach threshold
+        macd_threshold_10:
+          type: boolean
+          description: Enable 10% MACD cross approach threshold
+        rsi_enabled:
+          type: boolean
+          description: Enable RSI context by default
+        trend_enabled:
+          type: boolean
+          description: Enable EMA trend context by default
+        trend_period:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+          description: EMA period for the trend filter (defaults to the 100 EMA)
+        ema_period:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          description: EMA period for EMA cross alerts (100 or 200)
+        macd_context_enabled:
+          type: boolean
+          description: Include MACD trend context in EMA cross alerts
+        macd_context_timeframe:
+          type: string
+          description: Timeframe for the MACD trend context (defaults to 1h)
+          maxLength: 3
+        prediction_stage_a:
+          type: boolean
+          description: Enable the potential-move early warning
+        prediction_stage_b:
+          type: boolean
+          description: Enable the confirmed-breakout alert
+    PatternShot:
+      type: object
+      description: Base64 PNG in, picture metadata plus its API URL out; the bytes
+        never leave the server.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        symbol:
+          type: string
+          maxLength: 24
+        category:
+          $ref: '#/components/schemas/CategoryEnum'
+        pattern:
+          type: string
+          maxLength: 40
+        timeframe:
+          type: string
+          maxLength: 3
+        summary:
+          type: string
+          maxLength: 240
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        image_url:
+          type: string
+          readOnly: true
+        size:
+          type: integer
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - image_url
+      - pattern
+      - size
+      - symbol
+    PatternShotRequest:
+      type: object
+      description: Base64 PNG in, picture metadata plus its API URL out; the bytes
+        never leave the server.
+      properties:
+        symbol:
+          type: string
+          minLength: 1
+          maxLength: 24
+        category:
+          $ref: '#/components/schemas/CategoryEnum'
+        pattern:
+          type: string
+          minLength: 1
+          maxLength: 40
+        timeframe:
+          type: string
+          maxLength: 3
+        summary:
+          type: string
+          maxLength: 240
+        image:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - image
+      - pattern
+      - symbol
+    TelegramFindChatRequest:
+      type: object
+      properties:
+        bot_token:
+          type: string
+          minLength: 1
+          maxLength: 255
+      required:
+      - bot_token
+    TelegramFindChatResponse:
+      type: object
+      properties:
+        chat_id:
+          type: string
+        chat_name:
+          type: string
+      required:
+      - chat_id
+      - chat_name
+    TelegramStatus:
+      type: object
+      properties:
+        configured:
+          type: boolean
+        enabled:
+          type: boolean
+        chat_hint:
+          type: string
+          description: Comma-separated masked chat ids.
+      required:
+      - chat_hint
+      - configured
+      - enabled
+    TelegramTestRequest:
+      type: object
+      properties:
+        bot_token:
+          type: string
+          minLength: 1
+          maxLength: 255
+        chat_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+      required:
+      - bot_token
+      - chat_id
+    TriggerEvent:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        alert_id:
+          type: integer
+          readOnly: true
+        symbol:
+          type: string
+          maxLength: 24
+        title:
+          type: string
+          maxLength: 180
+        message:
+          type: string
+        observed_value:
+          type: number
+          format: double
+          nullable: true
+        triggered_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - alert_id
+      - id
+      - message
+      - symbol
+      - title
+      - triggered_at
+    WatchlistSlug:
+      type: object
+      description: The canonical CoinMarketCal slug resolved for one watchlist pair.
+      properties:
+        symbol:
+          type: string
+        slug:
+          type: string
+      required:
+      - slug
+      - symbol
+    WatchlistSymbol:
+      type: object
+      properties:
+        symbol:
+          type: string
+          maxLength: 24
+        position:
+          type: integer
+          readOnly: true
+        slug:
+          type: string
+          readOnly: true
+      required:
+      - position
+      - slug
+      - symbol
+    WatchlistSymbolRequest:
+      type: object
+      properties:
+        symbol:
+          type: string
+          minLength: 1
+          maxLength: 24
+      required:
+      - symbol
+  securitySchemes:
+    csrfSession:
+      type: apiKey
+      in: header
+      name: X-CSRFToken
+      description: Send the token from the csrftoken cookie (GET /api/telegram/csrf/)
+        as the X-CSRFToken header, alongside the session cookie when one is present.

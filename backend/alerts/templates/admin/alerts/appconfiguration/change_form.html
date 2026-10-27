@@ -1,0 +1,16 @@
+{% extends "admin/change_form.html" %}
+
+{% block object-tools-items %}
+  <li>
+    <button type="submit" form="notification_form" name="_find_chat" value="1" class="button">
+      Find my Telegram chat ID
+    </button>
+  </li>
+  <li>
+    <form method="post" action="{{ telegram_test_message_url }}">
+      {% csrf_token %}
+      <button type="submit" class="button">Send test Telegram message</button>
+    </form>
+  </li>
+  {{ block.super }}
+{% endblock %}
