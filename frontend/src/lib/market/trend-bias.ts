@@ -1,7 +1,7 @@
 import type { Bar } from "@/types/market";
 
-/** The two higher timeframes the trend-bias reading is built from. */
-export const TREND_BIAS_TIMEFRAMES = ["4h", "1d"] as const;
+/** The higher timeframes the trend-bias reading is built from. */
+export const TREND_BIAS_TIMEFRAMES = ["1h", "4h", "1d"] as const;
 export type TrendBiasTimeframe = (typeof TREND_BIAS_TIMEFRAMES)[number];
 
 export type TrendBiasDirection = "bullish" | "bearish" | "neutral";

@@ -57,9 +57,6 @@ export const defaultPreferences: Preferences = {
     keyLevel: false,
     trendBias: false,
   },
-  drawingsVisible: true,
-  alertsVisible: true,
-  magnet: false,
 };
 
 export const palettes = {

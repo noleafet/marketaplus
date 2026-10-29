@@ -126,9 +126,6 @@ export type Preferences = {
     keyLevel: boolean;
     trendBias: boolean;
   };
-  drawingsVisible: boolean;
-  alertsVisible: boolean;
-  magnet: boolean;
 };
 
 /** A pattern picture as the server returns it; the bytes stay behind the image URL. */

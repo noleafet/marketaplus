@@ -152,7 +152,6 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
   const [selected, setSelected] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool | null>(null);
   const [pendingPoint, setPendingPoint] = useState(false);
-  const [magnet, setMagnet] = useState(false);
   const [watchlistLoaded, setWatchlistLoaded] = useState(false);
   const [patternNote, setPatternNote] = useState("");
   const [patternBusy, setPatternBusy] = useState(false);
@@ -218,15 +217,11 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     setPatternNote("");
   }, [symbol, timeframe]);
   useEffect(() => {
-    const legacyView = readSaved("cd.view", { drawings: true, alerts: true });
     const legacyPreferences: Preferences = {
       ...defaultPreferences,
       timeframe: readSaved("cd.tf", defaultPreferences.timeframe),
       candleType: readSaved("cd.ctype", defaultPreferences.candleType),
       indicators: { ...defaultPreferences.indicators, ...readSaved("cd.ind", {}) },
-      drawingsVisible: legacyView.drawings,
-      alertsVisible: legacyView.alerts,
-      magnet: readSaved("cd.magnet", false),
     };
     const saved = readSaved<Preferences>("tradechart.preferences", legacyPreferences);
     // Merge over the defaults so a preference added after the user last saved still gets a value.
@@ -281,7 +276,6 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     void loadMarketEvents();
     return () => { active = false; };
   }, [symbol]);
-  useEffect(() => { setMagnet(preferences.magnet); }, [preferences.magnet]);
   useEffect(() => {
     let active = true;
     async function loadPatternShots() {
@@ -333,8 +327,8 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     () => preferences.indicators.keyLevel ? findKeyLevels(bars) : null,
     [bars, preferences.indicators.keyLevel],
   );
-  // Trend Bias reads the 4H and 1D structure directly, so it keeps its own candle cache instead of
-  // borrowing whichever interval the chart happens to be showing.
+  // Trend Bias reads the 1H, 4H and 1D structure directly, so it keeps its own candle cache
+  // instead of borrowing whichever interval the chart happens to be showing.
   useEffect(() => {
     if (!preferences.indicators.trendBias) return;
     let active = true;
@@ -502,7 +496,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
       const index = Math.min(data.length - 1, logicalIndex);
       const bar = data[index];
       const candle = preferencesRef.current.candleType === "ha" ? heikinAshi(data)[index] : bar;
-      const snappedPrice = preferencesRef.current.magnet || modifiers.current.ctrl ? [candle.open, candle.high, candle.low, candle.close].sort((a, b) => Math.abs(a - price) - Math.abs(b - price))[0] : price;
+      const snappedPrice = modifiers.current.ctrl ? [candle.open, candle.high, candle.low, candle.close].sort((a, b) => Math.abs(a - price) - Math.abs(b - price))[0] : price;
       const finalPrice = modifiers.current.shift && pendingRef.current ? pendingRef.current.price : snappedPrice;
       const last = data.at(-1)!;
       const time = logicalIndex < data.length
@@ -764,10 +758,10 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
   useEffect(() => {
     const candles = series.current?.candles;
     if (!candles) return;
-    const lines = preferences.alertsVisible ? alerts.filter((item) => item.kind === "price" && item.symbol === symbol && item.active && !item.line_type && item.price) : [];
+    const lines = alerts.filter((item) => item.kind === "price" && item.symbol === symbol && item.active && !item.line_type && item.price);
     const rendered = lines.map((item) => candles.createPriceLine({ price: Number(item.price), color: colors.amber, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `Alert Â· ${item.condition.replaceAll("_", " ")}` }));
     return () => rendered.forEach((line) => candles.removePriceLine(line));
-  }, [alerts, symbol, theme, preferences.alertsVisible]);
+  }, [alerts, symbol, theme]);
 
   // The pattern monitor runs only while started; starting it checks immediately instead of waiting.
   // Every pass reads the newest 50 candles, so scrolling never changes what is being analysed.
@@ -895,8 +889,9 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
           context.restore();
         }
       }
-      // Trend Bias is a higher-timeframe reading: the 4H and 1D regression channels are projected
-      // onto whatever interval the chart is showing and run one day past the newest candle.
+      // Trend Bias is a higher-timeframe reading: the 1H, 4H and 1D regression channels are
+      // projected onto whatever interval the chart is showing and run one day past the newest
+      // candle.
       if (trendBias.length) {
         const plotWidth = chart.timeScale().width() || bounds.width;
         const paneBottom = bounds.height * CANDLE_PANE_TOP;
@@ -973,7 +968,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
         context.restore();
       }
       for (const line of drawings) {
-        if (line.symbol !== symbol || line.hidden || !preferences.drawingsVisible) continue;
+        if (line.symbol !== symbol || line.hidden) continue;
         // Calculator setups are drawn as two zones that meet at the entry: red down to the stop
         // and green out to the target. They deliberately do not fall through to the line painter,
         // otherwise the shared entry edge would also get a stray line.
@@ -1052,7 +1047,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
         }
         const attached = alerts.find((alert) => alert.line_type === line.type && alert.line_t1 && Math.abs(Number(alert.line_price1) - line.p1) < 1e-10 && Math.abs(new Date(alert.line_t1).getTime() / 1000 - line.t1) < 2);
         const tone = line.tone === "long" ? colors.green : line.tone === "short" ? colors.red : colors.blue;
-        context.globalAlpha = line.opacity; context.strokeStyle = attached?.active && preferences.alertsVisible ? colors.amber : tone; context.lineWidth = line.width;
+        context.globalAlpha = line.opacity; context.strokeStyle = attached?.active ? colors.amber : tone; context.lineWidth = line.width;
         context.beginPath(); context.moveTo(drawX1, y1); context.lineTo(x2, y2); context.stroke(); context.globalAlpha = 1;
         if (selected === line.id) for (const [x, y] of [[x1, y1], [line.t2 === undefined ? x1 : drawingCoordinate(chart, line.t2, barsRef.current, timeframe) ?? x1, line.p2 === undefined ? y1 : current.candles.priceToCoordinate(line.p2) ?? y1]]) {
           context.fillStyle = colors.bg; context.strokeStyle = colors.blue; context.beginPath(); context.arc(x, y, 4, 0, Math.PI * 2); context.fill(); context.stroke();
@@ -1097,7 +1092,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
       animation = requestAnimationFrame(paint);
     };
     paint(); return () => cancelAnimationFrame(animation);
-  }, [bars, drawings, symbol, selected, theme, timeframe, keyLevels, trendBias, preferences.drawingsVisible, preferences.alertsVisible, alerts, patternOnChart, candlestickMatch]);
+  }, [bars, drawings, symbol, selected, theme, timeframe, keyLevels, trendBias, alerts, patternOnChart, candlestickMatch]);
 
   useEffect(() => {
     let valid = true;
@@ -1612,7 +1607,6 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
       line,
     ]);
     setSelected(line.id);
-    if (!preferences.drawingsVisible) changePreferences({ drawingsVisible: true });
   }
   function clearTradeEntry(target: string) {
     const previous = drawings.filter(
@@ -1635,7 +1629,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     const step = intervalSeconds[timeframe];
     const time = index < 0 ? Number(data[0].time) + index * step : index >= data.length ? Number(data.at(-1)!.time) + (index - data.length + 1) * step : Number(data[index].time);
     let value = Number(price);
-    if (preferencesRef.current.magnet || modifiers.current.ctrl) {
+    if (modifiers.current.ctrl) {
       const bar = preferencesRef.current.candleType === "ha" ? heikinAshi(data)[Math.max(0, Math.min(data.length - 1, index))] : data[Math.max(0, Math.min(data.length - 1, index))];
       value = [bar.open, bar.high, bar.low, bar.close].sort((a, b) => Math.abs(a - value) - Math.abs(b - value))[0];
     }
@@ -1743,7 +1737,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       if (event.key === "Escape") { setTool(null); modeRef.current = null; pendingRef.current = null; setPendingPoint(false); setSelected(null); return; }
       if ((event.key === "Delete" || event.key === "Backspace") && selected) { event.preventDefault(); removeDrawing(selected); return; }
-      const keyTools: Record<string, Tool> = { t: "trend", r: "ray", h: "hline", j: "hray" };
+      const keyTools: Record<string, Tool> = { t: "trend", h: "hline" };
       const next = keyTools[event.key.toLowerCase()];
       if (next) chooseTool(next);
     }
@@ -1818,15 +1812,8 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
             />
             <DrawingToolbar
               tool={tool}
-              magnet={magnet}
               pendingPoint={pendingPoint}
-              preferences={preferences}
               onChooseTool={chooseTool}
-              onChange={changePreferences}
-              onMagnetChange={(next) => {
-                setMagnet(next);
-                changePreferences({ magnet: next });
-              }}
             />
             <CandlestickMonitor
               running={candlestickRunning}

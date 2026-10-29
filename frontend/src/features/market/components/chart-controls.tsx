@@ -18,7 +18,7 @@ const indicatorTitles: Partial<Record<keyof Preferences["indicators"], string>> 
   keyLevel:
     "Shows up to two closest supports and two closest resistances scoring 40/100 or more. Strength: independent reactions 30, price rejection 25, higher-timeframe confluence 20, volume 15, recency 10",
   trendBias:
-    "Draws 4H and 1D trend channels through fractal swing highs and lows with linear regression, extended one day past the latest candle",
+    "Draws 1H, 4H and 1D trend channels through fractal swing highs and lows with linear regression, extended one day past the latest candle",
 };
 
 type IndicatorProps = {
