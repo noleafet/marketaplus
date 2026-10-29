@@ -24,10 +24,19 @@ export function drawingCoordinate(
   const scale = chart.timeScale();
   const coordinate = scale.timeToCoordinate(time as UTCTimestamp);
   if (coordinate !== null) return coordinate;
-  const last = data.at(-1);
-  if (!last || time <= Number(last.time)) return null;
+  const first = data[0];
+  if (!first || time < Number(first.time)) return null;
+  // Times that sit between the loaded bars - a 4H pivot on a 1D chart, for example - are not in
+  // the time scale, so interpolate from the bar just before them using the chart's bar spacing.
+  let low = 0;
+  let high = data.length - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (Number(data[mid].time) <= time) low = mid;
+    else high = mid - 1;
+  }
   const logical =
-    data.length - 1 + (time - Number(last.time)) / intervalSeconds[timeframe];
+    low + (time - Number(data[low].time)) / intervalSeconds[timeframe];
   return scale.logicalToCoordinate(logical as Logical);
 }
 

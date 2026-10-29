@@ -13,7 +13,7 @@ Marketa+ combines a **Next.js dashboard**, **Django REST API**, and **PostgreSQL
 
 ## Features
 
-- **Charts:** Candlesticks, volume, Heikin Ashi, EMA, Bollinger Bands, MACD, RSI, and ATR.
+- **Charts:** Candlesticks, volume, Heikin Ashi, EMA, Bollinger Bands, MACD, RSI, ATR, key levels, and 4H/1D trend-bias channels.
 - **Watchlist:** Database-backed symbols, exchange selection, and optional scan columns for volume versus the previous 20-candle average, RSI-14, EMA-100, MACD line-minus-signal difference, and open interest (from the futures market).
 - **Key levels:** Nearby support/resistance zones scored from 0–100 using swing reactions, rejection, higher-timeframe confluence, volume, and recency. Only levels scoring at least 40 are displayed.
 - **Alerts:** Price, MACD cross, EMA cross, drawing-line, and two-stage breakout/prediction alerts. Browser notifications, sound, and optional Telegram delivery are supported.

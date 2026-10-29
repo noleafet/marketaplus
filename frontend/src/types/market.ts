@@ -124,6 +124,7 @@ export type Preferences = {
     atr: boolean;
     bb: boolean;
     keyLevel: boolean;
+    trendBias: boolean;
   };
   drawingsVisible: boolean;
   alertsVisible: boolean;

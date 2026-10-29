@@ -55,6 +55,7 @@ export const defaultPreferences: Preferences = {
     atr: false,
     bb: false,
     keyLevel: false,
+    trendBias: false,
   },
   drawingsVisible: true,
   alertsVisible: true,

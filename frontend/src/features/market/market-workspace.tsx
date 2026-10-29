@@ -18,6 +18,9 @@ import {
 } from "@/lib/market/indicators";
 import { findKeyLevels } from "@/lib/market/key-levels";
 import { fetchCandles, fetchOpenInterest, fetchQuote } from "@/lib/market/market-data";
+import {
+  findTrendBias, TREND_BIAS_TIMEFRAMES, type TrendBiasTimeframe,
+} from "@/lib/market/trend-bias";
 import { emptyWatchMetrics, watchMetrics } from "@/lib/market/watch-metrics";
 import { readSaved } from "@/lib/storage";
 import CandlestickGuide from "@/features/candlesticks/components/candlestick-guide";
@@ -63,6 +66,8 @@ const WATCH_METRIC_MS = 60000;
 /** Calculator entry zones mostly sit behind the latest candle, with a little room to the right. */
 const ENTRY_ZONE_PAST_BARS = 18;
 const ENTRY_ZONE_FUTURE_BARS = 6;
+/** Higher-timeframe candles used to fit the Trend Bias channels. */
+const TREND_BIAS_BARS = 320;
 
 /** Calculator drawings drawn before stop/target zones existed still use a single entry band. */
 function entryZones(line: Drawing): DrawingZone[] {
@@ -125,6 +130,8 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
   /** Declared before the effects because several of them key off the selected interval. */
   const timeframe = preferences.timeframe;
   const [bars, setBars] = useState<Bar[]>([]);
+  /** Higher-timeframe candles for the Trend Bias overlay; fetched only while it is enabled. */
+  const [trendBiasBars, setTrendBiasBars] = useState<Partial<Record<TrendBiasTimeframe, Bar[]>>>({});
   /** Index of the candle under the crosshair in any pane; null falls back to the newest bar. */
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   /** First non-null value in each lower pane, so a pane's logical index can be mapped to a bar. */
@@ -325,6 +332,43 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
   const keyLevels = useMemo(
     () => preferences.indicators.keyLevel ? findKeyLevels(bars) : null,
     [bars, preferences.indicators.keyLevel],
+  );
+  // Trend Bias reads the 4H and 1D structure directly, so it keeps its own candle cache instead of
+  // borrowing whichever interval the chart happens to be showing.
+  useEffect(() => {
+    if (!preferences.indicators.trendBias) return;
+    let active = true;
+    // Drop the previous pair's channels immediately; the next fetch fills them back in.
+    setTrendBiasBars({});
+    const load = async () => {
+      const entries = await Promise.all(TREND_BIAS_TIMEFRAMES.map(async (biasTimeframe) => {
+        try {
+          const data = await fetchCandles(symbol, biasTimeframe, TREND_BIAS_BARS, exchange);
+          return [biasTimeframe, data] as const;
+        } catch {
+          // One unreachable timeframe should not hide the other.
+          return [biasTimeframe, []] as const;
+        }
+      }));
+      if (active) {
+        setTrendBiasBars(
+          Object.fromEntries(entries) as Partial<Record<TrendBiasTimeframe, Bar[]>>,
+        );
+      }
+    };
+    void load();
+    const timer = window.setInterval(load, CHART_REFRESH_MS);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [symbol, exchange, preferences.indicators.trendBias]);
+  const trendBias = useMemo(
+    () => preferences.indicators.trendBias
+      ? TREND_BIAS_TIMEFRAMES.flatMap((biasTimeframe) => {
+        const data = trendBiasBars[biasTimeframe];
+        const bias = data?.length ? findTrendBias(data, biasTimeframe) : null;
+        return bias ? [bias] : [];
+      })
+      : [],
+    [trendBiasBars, preferences.indicators.trendBias],
   );
   useEffect(() => {
     const chartElement = host.current;
@@ -851,6 +895,83 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
           context.restore();
         }
       }
+      // Trend Bias is a higher-timeframe reading: the 4H and 1D regression channels are projected
+      // onto whatever interval the chart is showing and run one day past the newest candle.
+      if (trendBias.length) {
+        const plotWidth = chart.timeScale().width() || bounds.width;
+        const paneBottom = bounds.height * CANDLE_PANE_TOP;
+        const firstBarTime = Number(barsRef.current[0]?.time ?? 0);
+        const labels: { x: number; y: number; text: string; tone: string; up: boolean }[] = [];
+        context.save();
+        context.beginPath();
+        context.rect(0, 0, plotWidth, paneBottom);
+        context.clip();
+        for (const bias of trendBias) {
+          const tone = bias.direction === "bullish"
+            ? colors.green
+            : bias.direction === "bearish" ? colors.red : colors.amber;
+          for (const line of bias.lines) {
+            // The chart may not hold enough history to reach the first pivot, so the segment starts
+            // at its oldest bar and the fitted slope is read at that later time.
+            const startTime = firstBarTime ? Math.max(line.t1, firstBarTime) : line.t1;
+            const startX = drawingCoordinate(chart, startTime, barsRef.current, timeframe);
+            const endX = drawingCoordinate(chart, line.t2, barsRef.current, timeframe);
+            if (startX === null || endX === null || Number(endX) <= Number(startX)) continue;
+            const startPrice = line.p1 + line.slope * (startTime - line.t1);
+            const startY = current.candles.priceToCoordinate(startPrice);
+            const endY = current.candles.priceToCoordinate(line.p2);
+            if (startY === null || endY === null) continue;
+            context.globalAlpha = 0.7;
+            context.strokeStyle = tone;
+            context.lineWidth = 1.5;
+            context.setLineDash([7, 5]);
+            context.beginPath();
+            context.moveTo(Number(startX), Number(startY));
+            context.lineTo(Number(endX), Number(endY));
+            context.stroke();
+            context.setLineDash([]);
+            // One pill per timeframe, carried by the upper line (or the only line when the other
+            // side had too few pivots).
+            if (line.kind === "high" || bias.lines.length === 1) {
+              const labelX = Math.min(Number(endX), plotWidth - 4);
+              const progress = (labelX - Number(startX)) / (Number(endX) - Number(startX));
+              labels.push({
+                x: labelX,
+                y: Number(startY) + (Number(endY) - Number(startY)) * progress,
+                text: `${bias.timeframe.toUpperCase()} ${bias.direction}`,
+                tone,
+                up: line.kind === "high",
+              });
+            }
+          }
+        }
+        context.globalAlpha = 1;
+        context.font = '600 9px "Geist", system-ui, sans-serif';
+        const pillHeight = 16;
+        const usedPills: number[] = [];
+        for (const label of labels) {
+          const pillWidth = context.measureText(label.text).width + 12;
+          const x = Math.max(4, Math.min(plotWidth - pillWidth - 4, label.x - pillWidth - 8));
+          const direction = label.up ? -1 : 1;
+          let y = label.up ? label.y - pillHeight - 5 : label.y + 5;
+          for (let attempt = 0; attempt < 4; attempt += 1) {
+            const overlaps = usedPills.some((used) =>
+              y < used + pillHeight + 3 && y + pillHeight + 3 > used);
+            if (!overlaps) break;
+            y += direction * (pillHeight + 3);
+          }
+          y = Math.max(2, Math.min(paneBottom - pillHeight - 2, y));
+          usedPills.push(y);
+          context.globalAlpha = 0.92;
+          context.fillStyle = label.tone;
+          context.fillRect(x, y, pillWidth, pillHeight);
+          context.globalAlpha = 1;
+          context.fillStyle = colors.bg;
+          context.textBaseline = "middle";
+          context.fillText(label.text, x + 6, y + pillHeight / 2);
+        }
+        context.restore();
+      }
       for (const line of drawings) {
         if (line.symbol !== symbol || line.hidden || !preferences.drawingsVisible) continue;
         // Calculator setups are drawn as two zones that meet at the entry: red down to the stop
@@ -976,7 +1097,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
       animation = requestAnimationFrame(paint);
     };
     paint(); return () => cancelAnimationFrame(animation);
-  }, [bars, drawings, symbol, selected, theme, timeframe, keyLevels, preferences.drawingsVisible, preferences.alertsVisible, alerts, patternOnChart, candlestickMatch]);
+  }, [bars, drawings, symbol, selected, theme, timeframe, keyLevels, trendBias, preferences.drawingsVisible, preferences.alertsVisible, alerts, patternOnChart, candlestickMatch]);
 
   useEffect(() => {
     let valid = true;
