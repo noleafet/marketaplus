@@ -7,8 +7,8 @@
 .market-event-trigger:hover .market-event-title{color:var(--green)}
 .market-event-trigger:focus-visible{outline:2px solid var(--green);outline-offset:3px;border-radius:4px}
 .market-event-impact{display:inline-flex;align-items:center;flex:0 0 auto;border-radius:3px;padding:1px 5px;font:600 8px var(--mono);letter-spacing:.6px;text-transform:uppercase;white-space:nowrap}
-.market-event-impact.impact-critical{background:#f4dcd8;color:#8d2f23}
-.market-event-impact.impact-high{background:#f8e4d8;color:#a3532d}
+.market-event-impact.impact-critical{background:#fee2e2;color:#b91c1c}
+.market-event-impact.impact-high{background:#ffedd5;color:#c2410c}
 .market-event-impact.impact-mid{background:#f6ecd7;color:#8a621d}
 .market-event-impact.impact-low{background:hsl(var(--secondary));color:#697268}
 .market-event-impact.impact-unknown{background:hsl(var(--secondary));color:hsl(var(--muted-foreground))}
@@ -18,8 +18,8 @@
 .market-events-list{overflow:auto;border-top:1px solid var(--line)}
 .market-event-item{padding:11px 18px;border-bottom:1px solid var(--line);border-left:3px solid transparent}
 .market-event-item:last-child{border-bottom:0}
-.market-event-item.impact-critical{border-left-color:#a63f30}
-.market-event-item.impact-high{border-left-color:#c47a45}
+.market-event-item.impact-critical{border-left-color:#dc2626}
+.market-event-item.impact-high{border-left-color:#ea580c}
 .market-event-item.impact-mid{border-left-color:var(--amber)}
 .market-event-item.impact-low,.market-event-item.impact-unknown{border-left-color:var(--line)}
 .market-event-item-head{display:flex;align-items:center;gap:7px;flex-wrap:wrap;color:var(--muted-ink);font:9px var(--mono)}
@@ -29,8 +29,8 @@
 .market-event-item-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:6px;color:var(--muted-ink);font:8px var(--mono)}
 .market-event-item-foot a{display:inline-flex;align-items:center;gap:3px;color:var(--green);text-decoration:none}
 .market-event-item-foot a:hover{text-decoration:underline}
-:root[data-theme="dark"] .market-event-impact.impact-critical{background:hsl(var(--destructive) / .14);color:hsl(var(--bearish))}
-:root[data-theme="dark"] .market-event-impact.impact-high{background:hsl(var(--amber) / .14);color:hsl(var(--amber))}
+:root[data-theme="dark"] .market-event-impact.impact-critical{background:hsl(0 84% 60% / .16);color:#fca5a5}
+:root[data-theme="dark"] .market-event-impact.impact-high{background:hsl(25 95% 53% / .16);color:#fb923c}
 :root[data-theme="dark"] .market-event-impact.impact-mid{background:hsl(var(--amber) / .12);color:hsl(var(--amber))}
 :root[data-theme="dark"] .market-event-impact.impact-low,
 :root[data-theme="dark"] .market-event-impact.impact-unknown{background:hsl(var(--secondary));color:hsl(var(--muted-foreground))}

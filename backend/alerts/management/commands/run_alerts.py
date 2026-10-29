@@ -14,6 +14,8 @@ from alerts.services import check_alerts, check_prediction_alerts
 
 logger = logging.getLogger(__name__)
 PREDICTION_POLL_SECONDS = 60
+# Every four hours starting at 02:00 UTC: 02, 06, 10, 14, 18 and 22.
+MARKET_EVENT_SYNC_HOURS = "2,6,10,14,18,22"
 
 
 class Command(BaseCommand):
@@ -76,7 +78,7 @@ class Command(BaseCommand):
             except Exception:
                 logger.exception("Scheduled market event sync failed")
                 self.stderr.write(self.style.ERROR(
-                    "Market event sync failed; it will be retried at the next midnight UTC run."
+                    "Market event sync failed; it will be retried at the next four-hourly run."
                 ))
 
         def report_job(event):
@@ -106,17 +108,17 @@ class Command(BaseCommand):
         )
         scheduler.add_job(
             sync_events,
-            trigger=CronTrigger(hour=0, minute=0, timezone=dt_timezone.utc),
+            trigger=CronTrigger(
+                hour=MARKET_EVENT_SYNC_HOURS, minute=0, timezone=dt_timezone.utc,
+            ),
             id="sync-market-events",
-            # Populate the dashboard right after deploy; the cron trigger then runs at 00:00 UTC.
-            next_run_time=timezone.now(),
             max_instances=1,
             coalesce=True,
         )
         self.stdout.write(self.style.SUCCESS(
             f"Alert scheduler started; checking immediately, then every {interval}s. "
             f"Prediction stages run every {PREDICTION_POLL_SECONDS}s. "
-            f"Market events sync at 00:00 UTC. Ctrl+C stops it."
+            f"Market events sync every 4 hours from 02:00 UTC. Ctrl+C stops it."
         ))
         try:
             scheduler.start()

@@ -25,6 +25,13 @@ export type WatchReading = {
   change: number | null;
 };
 
+/** One open-interest observation, timestamped at the start of its candle. */
+export type OpenInterestPoint = {
+  /** Unix seconds, matching `Bar.time`. */
+  time: number;
+  value: number;
+};
+
 /** Watchlist scan readings, all measured on the last fully closed candle of the selected interval. */
 export type WatchMetrics = {
   /** Last closed candle's volume as a percentage of the previous 20 candles' average. */
@@ -33,6 +40,8 @@ export type WatchMetrics = {
   ema: WatchReading;
   /** MACD line minus its signal line: positive after a bullish cross, negative after a bearish one. */
   macd: WatchReading;
+  /** Open interest at the last closed candle, with its change from the candle before it. */
+  oi: WatchReading;
 };
 
 export const lineTools = ["trend", "ray", "hline", "hray"] as const;

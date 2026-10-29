@@ -87,7 +87,7 @@ class MarketEvent(models.Model):
     """An upcoming CoinMarketCal event scraped for one watchlist symbol.
 
     One event can mention several coins, so the same external id is stored once per watchlist
-    symbol. Only upcoming rows are kept; the daily scrape deletes rows whose date has passed.
+    symbol. Only upcoming rows are kept; the recurring scrape deletes rows whose date has passed.
     """
 
     class Impact(models.TextChoices):

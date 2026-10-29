@@ -120,7 +120,7 @@ class WatchlistView(APIView):
             resolve_watchlist_slug(entry)
         except MarketEventError as exc:
             logger.warning("Coin slug lookup failed for %s: %s", symbol, exc)
-        # A new pair needs its events now; the daily midnight job only covers the existing list.
+        # A new pair needs its events now; the four-hourly sync only covers the existing list.
         if created or not MarketEvent.objects.filter(symbol=symbol).exists():
             try:
                 sync_symbol_events(symbol)

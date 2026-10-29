@@ -237,12 +237,12 @@
 .macd-chart[hidden],.rsi-chart[hidden],.atr-chart[hidden]{display:none}
 .workspace-grid .chart-hint{line-height:1.5}
 .watchlist{display:grid;}
-/* The 24-hour columns and the four scan columns share one grid, so a very narrow panel
+/* The 24-hour columns and the five scan columns share one grid, so a very narrow panel
    scrolls sideways instead of hiding a reading or breaking the row alignment. */
 .watch-table{overflow-x:auto}
-.watch-table .watch-head,.watch-table .watch-row{min-width:372px}
-/* # toggle, pair, last, 24h, then the four scan columns switched on by the # */
-.watch-head,.watch-row{display:grid;grid-template-columns: 4% 20% 15% 10% 10% 10% 10% 10% 5%;align-items:center}
+.watch-table .watch-head,.watch-table .watch-row{min-width:420px}
+/* # toggle, pair, last, 24h, then the five scan columns switched on by the # */
+.watch-head,.watch-row{display:grid;grid-template-columns: 4% 20% 14% 9% 9% 9% 9% 9% 9% 8%;align-items:center}
 .watch-head{padding:2px 3px 6px;border-bottom:1px solid var(--line);color:var(--muted-ink);font:8px var(--mono);letter-spacing:.5px;text-transform:uppercase}
 .watch-head span{text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .watch-head span:nth-child(2){text-align:left}

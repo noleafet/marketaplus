@@ -1652,11 +1652,15 @@ footer {
 }
 
 .market-event-impact.impact-critical {
-  background: hsl(var(--destructive) / 0.12);
-  color: hsl(var(--destructive));
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
-.market-event-impact.impact-high,
+.market-event-impact.impact-high {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
 .market-event-impact.impact-mid {
   background: hsl(var(--amber) / 0.14);
   color: hsl(var(--amber));

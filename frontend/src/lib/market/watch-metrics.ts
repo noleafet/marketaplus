@@ -1,4 +1,4 @@
-import type { Bar, WatchMetrics, WatchReading } from "@/types/market";
+import type { Bar, OpenInterestPoint, WatchMetrics, WatchReading } from "@/types/market";
 import { ema, macdValues, rsi } from "./indicators";
 
 /** A reading that could not be measured, and therefore has no change either. */
@@ -10,6 +10,7 @@ export const emptyWatchMetrics: WatchMetrics = {
   rsi: emptyReading,
   ema: emptyReading,
   macd: emptyReading,
+  oi: emptyReading,
 };
 
 /**
@@ -33,7 +34,7 @@ function volumeRatio(bars: Bar[], index: number): number | null {
 }
 
 /**
- * Reads one pair's watchlist columns from its candles.
+ * Reads one pair's watchlist columns from its candles and recent open interest.
  *
  * Both exchanges leave the newest candle open, so every reading comes from the candle before it.
  * That also matches what the columns mean: they describe what already closed, rather than a number
@@ -41,7 +42,10 @@ function volumeRatio(bars: Bar[], index: number): number | null {
  * before that one, which is the second-latest closed candle. The volume percentage compares a
  * closed candle with the twenty candles before it, which is why 21 bars are needed for a reading.
  */
-export function watchMetrics(bars: Bar[]): WatchMetrics {
+export function watchMetrics(
+  bars: Bar[],
+  openInterest: OpenInterestPoint[] = [],
+): WatchMetrics {
   // The final bar is the one still forming, so a pair needs at least two to have a closed candle.
   if (bars.length < 2) return emptyWatchMetrics;
   const lastClosed = bars.length - 2;
@@ -50,6 +54,11 @@ export function watchMetrics(bars: Bar[]): WatchMetrics {
   const rsiValues = rsi(closes, 14);
   const emaValues = ema(closes, 100);
   const histogram = macdValues(closes).histogram;
+  // Open interest comes from a separate futures endpoint, so match it to the candle timestamps
+  // instead of assuming both series line up by index.
+  const openInterestByTime = new Map(openInterest.map((point) => [point.time, point.value]));
+  const lastClosedTime = Number(bars[lastClosed]?.time);
+  const previousClosedTime = previousClosed >= 0 ? Number(bars[previousClosed].time) : null;
 
   return {
     vol: reading(volumeRatio(bars, lastClosed), volumeRatio(bars, previousClosed)),
@@ -57,5 +66,9 @@ export function watchMetrics(bars: Bar[]): WatchMetrics {
     ema: reading(emaValues[lastClosed] ?? null, emaValues[previousClosed] ?? null),
     // The histogram is the crossover difference: one sign before the cross, the other after it.
     macd: reading(histogram[lastClosed] ?? null, histogram[previousClosed] ?? null),
+    oi: reading(
+      openInterestByTime.get(lastClosedTime) ?? null,
+      previousClosedTime === null ? null : openInterestByTime.get(previousClosedTime) ?? null,
+    ),
   };
 }

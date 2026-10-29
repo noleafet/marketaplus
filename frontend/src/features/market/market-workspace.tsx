@@ -17,7 +17,7 @@ import {
   macdValues, rsi,
 } from "@/lib/market/indicators";
 import { findKeyLevels } from "@/lib/market/key-levels";
-import { fetchCandles, fetchQuote } from "@/lib/market/market-data";
+import { fetchCandles, fetchOpenInterest, fetchQuote } from "@/lib/market/market-data";
 import { emptyWatchMetrics, watchMetrics } from "@/lib/market/watch-metrics";
 import { readSaved } from "@/lib/storage";
 import CandlestickGuide from "@/features/candlesticks/components/candlestick-guide";
@@ -56,6 +56,8 @@ const PATTERN_CHECK_MS = 60000;
 const PATTERN_KEYS = patternChoices.map((item) => item.value);
 /** One watchlist scan needs enough candles for EMA-100, RSI-14 and the MACD warm-up. */
 const WATCH_METRIC_BARS = 160;
+/** Open interest is matched to the two latest closed candles, so a couple of periods suffice. */
+const WATCH_OI_POINTS = 4;
 /** Enabled watchlist rows rescan once a minute, apart from the 8-second quote poll. */
 const WATCH_METRIC_MS = 60000;
 /** Calculator entry zones mostly sit behind the latest candle, with a little room to the right. */
@@ -1018,8 +1020,12 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     async function scan() {
       await Promise.all(watchEnabled.map(async (pair) => {
         try {
-          const data = await fetchCandles(pair, timeframe, WATCH_METRIC_BARS, exchange);
-          if (active) setWatchScans((all) => ({ ...all, [pair]: watchMetrics(data) }));
+          const [data, openInterest] = await Promise.all([
+            fetchCandles(pair, timeframe, WATCH_METRIC_BARS, exchange),
+            // A pair without a futures market still gets the candle columns.
+            fetchOpenInterest(pair, timeframe, WATCH_OI_POINTS, exchange).catch(() => []),
+          ]);
+          if (active) setWatchScans((all) => ({ ...all, [pair]: watchMetrics(data, openInterest) }));
         } catch {
           if (active) setWatchScans((all) => ({ ...all, [pair]: emptyWatchMetrics }));
         }

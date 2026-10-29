@@ -27,6 +27,7 @@ const METRIC_TITLES = {
   rsi: "RSI-14 on the last closed candle",
   ema: "EMA-100 on the last closed candle",
   macd: "MACD crossover difference: the MACD line minus its signal line on the last closed candle. Positive is a bullish cross, negative a bearish one",
+  oi: "Open interest at the last closed candle, with its change from the closed candle before it",
 } as const;
 
 /**
@@ -124,6 +125,7 @@ export default function WatchlistPanel({
             <span title={METRIC_TITLES.rsi}>RSI</span>
             <span title={METRIC_TITLES.ema}>EMA</span>
             <span title={METRIC_TITLES.macd}>MACD</span>
+            <span title={METRIC_TITLES.oi}>OI</span>
             <span />
           </div>
           <div className="watchlist">
@@ -144,8 +146,8 @@ export default function WatchlistPanel({
                     aria-label={`${on ? "Stop" : "Start"} the watchlist scan for ${pair}`}
                     title={
                       on
-                        ? `Stop scanning Vol, RSI-14, EMA-100 and MACD for ${pair}`
-                        : `Scan Vol, RSI-14, EMA-100 and MACD for ${pair} on ${timeframe.toUpperCase()}`
+                        ? `Stop scanning Vol, RSI-14, EMA-100, MACD and OI for ${pair}`
+                        : `Scan Vol, RSI-14, EMA-100, MACD and OI for ${pair} on ${timeframe.toUpperCase()}`
                     }
                     onClick={() => onToggleMetrics(pair)}
                   >
@@ -178,6 +180,9 @@ export default function WatchlistPanel({
                         (value) => `${value >= 0 ? "+" : ""}${compact(value, 4)}`,
                         (value) => (value >= 0 ? "positive" : "negative"),
                       )
+                    : ""}
+                  {on
+                    ? reading(metric?.oi, METRIC_TITLES.oi, (value) => compact(value, 2))
                     : ""}
                   <button
                     className="remove-watch"
