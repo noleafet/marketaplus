@@ -26,8 +26,17 @@ type Props = {
   legendMacd: MacdLegend | null;
   legendRsi: number | null;
   legendAtr: number | null;
+  /** True while the bar under the pointer is the still-forming newest candle. */
+  live: boolean;
   message: string;
   patternNote: string;
+  /** Persistent description of the detected pattern: entry, invalidation and summary. */
+  patternDetail: string;
+  /** Higher-timeframe direction with its slope and pivot count. */
+  trendBiasDetail: string;
+  connection: "loading" | "live" | "stale";
+  historyLoading: boolean;
+  onRetry: () => void;
   onPointerDown: PointerEventHandler<HTMLCanvasElement>;
   onPointerMove: PointerEventHandler<HTMLCanvasElement>;
   onPointerUp: PointerEventHandler<HTMLCanvasElement>;
@@ -49,8 +58,14 @@ export default function ChartPanes({
   legendMacd,
   legendRsi,
   legendAtr,
+  live,
   message,
   patternNote,
+  patternDetail,
+  trendBiasDetail,
+  connection,
+  historyLoading,
+  onRetry,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -106,6 +121,7 @@ export default function ChartPanes({
             ariaLabel="Candle details"
             time={legendTime}
             timeframe={timeframe}
+            live={live}
             entries={[
               { label: "Entry", value: fmt(legendBar.open), title: "Candle open", tone: candleTone },
               { label: "High", value: fmt(legendBar.high), tone: candleTone },
@@ -113,7 +129,18 @@ export default function ChartPanes({
             ]}
           />
         )}
-        {message && <div className="chart-message">{message}</div>}
+        {message && (
+          <div className="chart-message" role="status">
+            <div className="chart-message-box">
+              <span>{message}</span>
+              {connection === "stale" && (
+                <button type="button" className="chart-retry" onClick={onRetry}>
+                  Retry
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {patternNote && <div className="pattern-note" role="status">{patternNote}</div>}
       </div>
       <div className="indicator-pane" hidden={!preferences.indicators.macd}>
@@ -156,8 +183,13 @@ export default function ChartPanes({
           />
         )}
       </div>
-      <p className="chart-hint">
-       &nbsp;
+      <p className="chart-hint" role="status">
+        {[
+          connection === "stale" ? "Live data delayed — showing the last good candles." : null,
+          historyLoading ? "Loading older candles…" : null,
+          trendBiasDetail ? `Trend bias (context): ${trendBiasDetail}` : null,
+          patternDetail || null,
+        ].filter(Boolean).join(" · ") || "\u00a0"}
       </p>
     </>
   );

@@ -1907,3 +1907,84 @@ footer {
     height: 1.9rem;
   }
 }
+
+/* Chart status: connection, retries, live candles and monitor details */
+.chart-connection {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 7px;
+  padding: 1px 5px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font: 600 8px var(--font-mono);
+  letter-spacing: 0.06em;
+}
+.chart-connection.live { color: var(--green); }
+.chart-connection.loading { color: var(--amber); }
+.chart-connection.stale { color: var(--red); }
+
+.chart-message-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: min(420px, 88%);
+  text-align: center;
+}
+.chart-retry {
+  border: 1px solid var(--green);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--green);
+  padding: 5px 12px;
+  font: 10px var(--mono);
+}
+.chart-retry:hover { background: hsl(var(--bullish) / 0.1); }
+
+.legend-live {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--amber);
+  color: hsl(var(--background));
+  font: 600 7.5px var(--font-mono);
+  letter-spacing: 0.5px;
+  vertical-align: 1px;
+}
+
+/* The status line sits under the panes; the base sheet hides the old empty hint. */
+.workspace-grid .chart-hint {
+  display: block;
+  min-height: 13px;
+  margin: 6px 0 0;
+  color: var(--muted-ink);
+  font: 9px var(--mono);
+  line-height: 1.5;
+}
+
+.monitor-detail {
+  flex: 1 1 100%;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted-ink);
+  font: 9px var(--mono);
+  line-height: 1.5;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 900px) {
+  .monitor-detail { text-align: left; }
+}
+
+.watch-stale {
+  margin: 0 0 8px;
+  color: var(--amber);
+  font: 9px var(--mono);
+  line-height: 1.5;
+}
+
+.drawing-overlay.interactive { cursor: grab; }
+.drawing-overlay.interactive:active { cursor: grabbing; }

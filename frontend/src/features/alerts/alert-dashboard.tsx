@@ -195,12 +195,15 @@ export default function AlertDashboard() {
   }, []);
 
   async function selectExchange(next: Exchange) {
+    // The chart reads either exchange directly from the browser, so the switch takes effect
+    // immediately; only persisting the preference needs the API.
+    setExchange(next);
+    setError("");
     try {
       const saved = await api<{ exchange: Exchange }>("/exchange/", { method: "POST", body: JSON.stringify({ exchange: next }) });
       setExchange(saved.exchange);
     } catch (reason) {
-      setError(readableError(reason, "Could not change the exchange."));
-      void refresh();
+      setError(readableError(reason, "Could not save the exchange preference; the chart is showing the selected market."));
     }
   }
 

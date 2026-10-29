@@ -17,14 +17,17 @@ type Props = {
   timeframe: Timeframe;
   entries: LegendEntry[];
   pane?: boolean;
+  /** True when the bar under the pointer is still forming, so its values can still change. */
+  live?: boolean;
 };
 
 /** Shared hover card for the price pane and each indicator pane. */
-export default function ChartLegend({ ariaLabel, time, timeframe, entries, pane = false }: Props) {
+export default function ChartLegend({ ariaLabel, time, timeframe, entries, pane = false, live = false }: Props) {
   return (
     <div className={`chart-legend ${pane ? "pane-legend" : ""}`.trim()} aria-label={ariaLabel}>
       <time dateTime={new Date(time * 1000).toISOString()}>
         {candleTimeLabel(time, timeframe)}
+        {live && <span className="legend-live" title="This candle is still forming; its values can still change.">LIVE</span>}
       </time>
       <dl>
         {entries.map((entry) => (

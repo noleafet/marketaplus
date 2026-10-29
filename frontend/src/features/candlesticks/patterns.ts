@@ -178,6 +178,8 @@ export type CandlestickMatch = {
   candles: number;
   high: number;
   low: number;
+  /** Close of the confirming candle: the price the formation completed at. */
+  formationPrice: number;
 };
 
 const bullish = (bar: CandleBar) => bar.close > bar.open;
@@ -247,7 +249,9 @@ function eveningStar(bars: readonly CandleBar[], end: number, average: number) {
 
 function threeBlackCrows(bars: readonly CandleBar[], end: number, average: number) {
   const [first, second, third] = [bars[end - 2], bars[end - 1], bars[end]];
-  if (![first, second, third].every(bearish)) return false;
+  // Three bearish candles are only a reversal when they interrupt a rise; in a decline they are
+  // simply continuation and the pattern's bearish reversal label would be misleading.
+  if (!risingInto(bars, end - 2) || ![first, second, third].every(bearish)) return false;
   if (!(first.close > second.close && second.close > third.close)) return false;
   // Each candle opens inside the previous body, which is what makes the stair-step readable.
   if (!(second.open <= first.open && second.open >= first.close)) return false;
@@ -403,8 +407,9 @@ function buildMatch(bars: readonly CandleBar[], end: number, detector: Detector)
     success: pattern.success,
     frequency: pattern.frequency,
     summary:
-      `${pattern.label} on the last ${CANDLESTICK_LOOKBACK} candles · ` +
-      `${pattern.success}% ${bias} reversal · ${pattern.frequency.toLowerCase()} frequency`,
+      `${pattern.label} on completed candles · ` +
+      `${bias} reversal · reference rate ${pattern.success}% (not a live confidence score) · ` +
+      `${pattern.frequency.toLowerCase()} frequency`,
     startIndex: start,
     endIndex: end,
     startTime: Number(bars[start].time),
@@ -412,6 +417,7 @@ function buildMatch(bars: readonly CandleBar[], end: number, detector: Detector)
     candles: detector.candles,
     high,
     low,
+    formationPrice: bars[end].close,
   };
 }
 

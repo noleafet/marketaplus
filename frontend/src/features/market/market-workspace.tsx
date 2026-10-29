@@ -3,21 +3,22 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ColorType, CrosshairMode, LineStyle, createChart,
-  type IChartApi, type MouseEventParams,
+  type IChartApi, type Logical, type MouseEventParams,
 } from "lightweight-charts";
 import { API, readJson } from "@/lib/api/client";
-import { copyWindowSoon, drawingCoordinate } from "@/lib/chart";
-import { fmt, idFor, pricePrecision } from "@/lib/format";
+import { hitTestDrawings, copyWindowSoon, drawingCoordinate, type ScreenLine } from "@/lib/chart";
+import { candleTimeLabel, fmt, idFor, pricePrecision } from "@/lib/format";
 import {
   CANDLE_PANE_TOP, CHART_REFRESH_MS, CLEAR_ARM_MS, INITIAL_VISIBLE_BARS, KEPT_PER_SYMBOL,
   TRAILING_BARS, defaultPreferences, exchangeName, intervalSeconds, palettes,
 } from "@/lib/market/constants";
-import {
-  atr, barIndexForLogical, bollingerBands, ema, heikinAshi, indicatorPoints,
-  macdValues, rsi,
-} from "@/lib/market/indicators";
+import { closedBars, liveBarIndex, mergeBars } from "@/lib/market/candles";
+import { heikinAshi, indicatorPoints, barIndexForLogical } from "@/lib/market/indicators";
+import { computeIndicators, firstValueIndex } from "@/lib/market/indicator-set";
 import { findKeyLevels } from "@/lib/market/key-levels";
-import { fetchCandles, fetchOpenInterest, fetchQuote } from "@/lib/market/market-data";
+import {
+  fetchCandles, fetchOpenInterest, fetchQuote, fetchQuotes, isRateLimitError,
+} from "@/lib/market/market-data";
 import {
   findTrendBias, TREND_BIAS_TIMEFRAMES, type TrendBiasTimeframe,
 } from "@/lib/market/trend-bias";
@@ -68,6 +69,18 @@ const ENTRY_ZONE_PAST_BARS = 18;
 const ENTRY_ZONE_FUTURE_BARS = 6;
 /** Higher-timeframe candles used to fit the Trend Bias channels. */
 const TREND_BIAS_BARS = 320;
+/** One history page matches the exchange's maximum page size. */
+const HISTORY_PAGE = 1000;
+/** Stop paging once this many candles are loaded, so a long session stays responsive. */
+const MAX_HISTORY_BARS = 5000;
+/** Scrolling within this many bars of the left edge asks for the previous page. */
+const HISTORY_TRIGGER_BARS = 8;
+/** A failed poll backs off up to this long, which keeps a rate-limited client from hammering. */
+const MAX_POLL_BACKOFF_MS = 5 * 60 * 1000;
+/** Quotes are cheaper batched, so the whole watchlist refreshes in one request. */
+const QUOTE_REFRESH_MS = 10000;
+
+type ConnectionState = "loading" | "live" | "stale";
 
 /** Calculator drawings drawn before stop/target zones existed still use a single entry band. */
 function entryZones(line: Drawing): DrawingZone[] {
@@ -85,7 +98,11 @@ function entryZones(line: Drawing): DrawingZone[] {
 type PaneIndicatorValues = {
   rsi: (number | null)[];
   atr: (number | null)[];
-  macd: ReturnType<typeof macdValues>;
+  macd: {
+    line: (number | null)[];
+    signal: (number | null)[];
+    histogram: (number | null)[];
+  };
 };
 export default function MarketWorkspace({ symbol, exchange = "binance", onExchangeChange, theme = "light", onSymbolChange, onPriceSelect, alerts, onCreateLineAlert, onUpdateLineAlert, onDeleteLineAlert }: MarketWorkspaceProps) {
   const host = useRef<HTMLDivElement>(null);
@@ -122,7 +139,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
   const equalizeScaleWidths = useRef<() => void>(() => {});
   /**
    * The pair and interval that barsRef actually holds. Switching either tears the chart down and
-   * fetches again, and until that lands the old bars are still in the ref â€” without this tag the
+   * fetches again, and until that lands the old bars are still in the ref — without this tag the
    * pattern export would happily measure five-minute bars and caption the picture "1D".
    */
   const barsFor = useRef<{ symbol: string; timeframe: Preferences["timeframe"] } | null>(null);
@@ -179,8 +196,21 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
   const [candlestickClearArmed, setCandlestickClearArmed] = useState<string | null>(null);
   const [candlestickClearing, setCandlestickClearing] = useState<string | null>(null);
   const candlestickArmRef = useRef<HTMLButtonElement | null>(null);
+  /** Whether the newest candles are confirmed by a successful poll or only the last good fetch. */
+  const [connection, setConnection] = useState<ConnectionState>("loading");
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [quotesStale, setQuotesStale] = useState(false);
+  /** Bumped by the retry button to rebuild the chart and fetch again. */
+  const [reloadKey, setReloadKey] = useState(0);
+  /** Re-draws the canvas overlay on demand instead of running a frame loop forever. */
+  const repaintRef = useRef<() => void>(() => {});
+  /** Drawings as the chart click handler sees them, without re-subscribing on every edit. */
+  const drawingsRef = useRef<Drawing[]>([]);
+  /** Candlestick formations already reported, so one shape is never announced twice. */
+  const formationSeen = useRef<Set<string>>(new Set());
   const preferencesRef = useRef(preferences);
   preferencesRef.current = preferences;
+  drawingsRef.current = drawings;
 
   useEffect(() => setDraft(symbol), [symbol]);
   // An armed Clear all stands down on its own after a moment, or as soon as the user touches
@@ -215,7 +245,11 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     setCandlestickNote("");
     setPatternOnChart(null);
     setPatternNote("");
-  }, [symbol, timeframe]);
+    formationSeen.current.clear();
+    // A price and change from the previous pair must not be shown as the new pair's.
+    setQuote(null);
+    setChange(null);
+  }, [symbol, timeframe, exchange]);
   useEffect(() => {
     const legacyPreferences: Preferences = {
       ...defaultPreferences,
@@ -321,11 +355,16 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     return () => { window.removeEventListener("keydown", update); window.removeEventListener("keyup", update); window.removeEventListener("blur", clear); };
   }, []);
 
+  // Every per-bar indicator is calculated once and shared by the panes, the legend and the
+  // calculator, so a poll cannot leave two of them describing different values.
+  const indicatorSet = useMemo(() => computeIndicators(bars), [bars]);
+  // Signals read completed candles only; the newest bar is still forming on both exchanges.
+  const closedSignalBars = useMemo(() => closedBars(bars, timeframe), [bars, timeframe]);
   // Key levels are calculated from raw OHLC, not the displayed Heikin Ashi bars: averaging
   // candles would move the wick highs and lows that define the reactions.
   const keyLevels = useMemo(
-    () => preferences.indicators.keyLevel ? findKeyLevels(bars) : null,
-    [bars, preferences.indicators.keyLevel],
+    () => preferences.indicators.keyLevel ? findKeyLevels(closedSignalBars) : null,
+    [closedSignalBars, preferences.indicators.keyLevel],
   );
   // Trend Bias reads the 1H, 4H and 1D structure directly, so it keeps its own candle cache
   // instead of borrowing whichever interval the chart happens to be showing.
@@ -371,8 +410,17 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     const atrElement = atrHost.current;
     if (!chartElement || !macdElement || !rsiElement || !atrElement) return;
     setHoveredIndex(null);
+    setConnection("loading");
+    setHistoryLoading(false);
+    // Formations belong to the pair and interval that reported them; a new chart starts clean.
+    formationSeen.current.clear();
     let active = true;
-    let poller: number | undefined;
+    let pollTimer: number | undefined;
+    let pollDelay = CHART_REFRESH_MS;
+    let pollFailed = false;
+    let loadingOlder = false;
+    let historyExhausted = false;
+    let historyRetryAt = 0;
     const makeChart = (element: HTMLDivElement) => createChart(element, {
       // Let the library own its own ResizeObserver. Hidden indicator panes are 0Ã—0 when they are
       // created, and the library notices when they are shown; explicit sizes are only the fallback
@@ -480,14 +528,54 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
       copyWindowSoon(chart, rsiChart);
       copyWindowSoon(chart, atrChart);
       equalizePriceScales();
+      // The overlay uses the chart's pixel coordinates, which a resize changes.
+      repaintRef.current();
     });
     observer.observe(chartElement); observer.observe(macdElement); observer.observe(rsiElement); observer.observe(atrElement);
+    /** Projects a saved drawing into pixels for hit-testing, mirroring how the overlay paints it. */
+    function drawingScreenLine(line: Drawing): ScreenLine | null {
+      const plotWidth = chart.timeScale().width() || chartElement?.clientWidth || 0;
+      const y1 = candles.priceToCoordinate(line.p1);
+      if (y1 === null) return null;
+      if (line.type === "hline" || line.type === "hray" || line.origin === "calculator") {
+        const startX = drawingCoordinate(chart, line.t1, barsRef.current, timeframe) ?? 0;
+        const endX = line.t2 === undefined
+          ? plotWidth
+          : drawingCoordinate(chart, line.t2, barsRef.current, timeframe) ?? plotWidth;
+        return { id: line.id, x1: line.type === "hline" ? 0 : Number(startX), y1, x2: Number(endX), y2: y1 };
+      }
+      if (line.t2 === undefined || line.p2 === undefined) return null;
+      const x1 = drawingCoordinate(chart, line.t1, barsRef.current, timeframe);
+      const x2 = drawingCoordinate(chart, line.t2, barsRef.current, timeframe);
+      const y2 = candles.priceToCoordinate(line.p2);
+      if (x1 === null || x2 === null || y2 === null) return null;
+      if (line.type === "ray" || (line.type === "trend" && line.extend)) {
+        if (x2 === x1) return { id: line.id, x1, y1, x2: Number(x2), y2: Number(y2) };
+        const endY = Number(y1) + ((Number(y2) - Number(y1)) * (plotWidth - Number(x1))) / (Number(x2) - Number(x1));
+        return { id: line.id, x1, y1, x2: plotWidth, y2: endY };
+      }
+      return { id: line.id, x1, y1, x2, y2 };
+    }
     chart.subscribeClick((param) => {
       if (!param.point) return;
       const price = candles.coordinateToPrice(param.point.y);
       const activeTool = modeRef.current;
-      if (price !== null && !activeTool && param.time) onPriceSelect(String(Number(price.toPrecision(10))));
-      if (!activeTool) return;
+      if (!activeTool) {
+        // Clicking a line selects it for editing; clicking empty space clears the selection and
+        // offers the price to the alert form, which is what a click did before drawings existed.
+        const lines = drawingsRef.current
+          .filter((line) => line.symbol === symbol && !line.hidden)
+          .flatMap((line) => {
+            const projected = drawingScreenLine(line);
+            return projected ? [projected] : [];
+          });
+        // A wider threshold on touch-sized screens makes a thin line reachable with a finger.
+        const hit = hitTestDrawings(lines, param.point.x, param.point.y, chartElement.clientWidth < 640 ? 12 : 8);
+        if (hit) { setSelected(hit); return; }
+        setSelected(null);
+        if (price !== null && param.time) onPriceSelect(String(Number(price.toPrecision(10))));
+        return;
+      }
       const logical = chart.timeScale().coordinateToLogical(param.point.x);
       if (logical === null) return;
       const data = barsRef.current;
@@ -596,14 +684,19 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     // price chart is free to be dragged past the newest candle, which is the point.
     chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
       if (syncing.current) return;
+      // The drawing and pattern overlays are painted in pixels, so a pan or zoom moves them too.
+      repaintRef.current();
       const indicators = preferencesRef.current.indicators;
       if (indicators.macd) copyWindowSoon(chart, macdChart);
       if (indicators.rsi) copyWindowSoon(chart, rsiChart);
       if (indicators.atr) copyWindowSoon(chart, atrChart);
+      // Scrolling back to the left edge asks the exchange for the page before the loaded history.
+      const range = chart.timeScale().getVisibleLogicalRange();
+      if (range && range.from <= HISTORY_TRIGGER_BARS) void loadOlder();
     });
 
-    async function requestCandles(limit: number): Promise<Bar[]> {
-      return fetchCandles(symbol, timeframe, limit, exchange);
+    async function requestCandles(limit: number, endTime?: number): Promise<Bar[]> {
+      return fetchCandles(symbol, timeframe, limit, exchange, endTime);
     }
 
     function renderBars(data: Bar[]) {
@@ -625,14 +718,98 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
       equalizePriceScales();
     }
 
+    /**
+     * Fetches the page before the oldest loaded candle and prepends it, keeping the bars the user
+     * is looking at in place. Scrolling to the left edge asks for this, so history grows on demand
+     * instead of every session downloading the exchange's whole archive.
+     */
+    async function loadOlder() {
+      if (loadingOlder || historyExhausted || !active) return;
+      const data = barsRef.current;
+      if (!data.length || barsFor.current?.symbol !== symbol || barsFor.current?.timeframe !== timeframe) return;
+      if (Date.now() < historyRetryAt) return;
+      if (data.length >= MAX_HISTORY_BARS) { historyExhausted = true; return; }
+      loadingOlder = true;
+      setHistoryLoading(true);
+      try {
+        const older = await requestCandles(HISTORY_PAGE, Number(data[0].time) * 1000 - 1);
+        if (!active) return;
+        const known = new Set(data.map((bar) => Number(bar.time)));
+        const added = older.reduce((count, bar) => count + (known.has(Number(bar.time)) ? 0 : 1), 0);
+        // An exchange that returns only the candles already held has no more history behind them.
+        if (!added) { historyExhausted = true; return; }
+        const range = chart.timeScale().getVisibleLogicalRange();
+        renderBars(mergeBars(older, data, true));
+        // The new candles sit before the old first bar, so the same window shifts right by their count.
+        if (range) chart.timeScale().setVisibleLogicalRange({ from: range.from + added, to: range.to + added });
+        const indicators = preferencesRef.current.indicators;
+        if (indicators.macd) copyWindowSoon(chart, macdChart);
+        if (indicators.rsi) copyWindowSoon(chart, rsiChart);
+        if (indicators.atr) copyWindowSoon(chart, atrChart);
+        repaintRef.current();
+      } catch (error) {
+        if (active) {
+          // A rate-limited or offline exchange should not be asked again on every scroll event.
+          historyRetryAt = Date.now() + 15000;
+          setMessage(error instanceof Error ? error.message : "Could not load older candles.");
+        }
+      } finally {
+        if (active) { loadingOlder = false; setHistoryLoading(false); }
+      }
+    }
+
+    function schedulePoll() {
+      if (!active) return;
+      window.clearTimeout(pollTimer);
+      pollTimer = window.setTimeout(() => void poll(), pollDelay);
+    }
+
+    async function poll() {
+      if (!active) return;
+      // The poll replaces candles only. Drawings live in their own state and are never reloaded or
+      // cleared here; pause while a point is being placed or an existing line is being dragged.
+      if (modeRef.current || pendingRef.current || dragRef.current) {
+        schedulePoll();
+        return;
+      }
+      try {
+        const latest = await requestCandles(2);
+        if (!active) return;
+        if (latest.length) {
+          const wasEmpty = !barsRef.current.length;
+          renderBars(mergeBars(latest, barsRef.current));
+          // The first fetch can fail and a later poll deliver the series; size the window then.
+          if (wasEmpty) {
+            pendingWindow = barsRef.current.length;
+            applyLatestWindow();
+            applyLatestWindowSoon();
+          }
+        }
+        if (pollFailed) { pollFailed = false; setMessage(""); }
+        pollDelay = CHART_REFRESH_MS;
+        setConnection("live");
+      } catch (error) {
+        if (!active) return;
+        pollFailed = true;
+        // Exponential backoff keeps a rate-limited browser from hammering the same endpoint.
+        pollDelay = Math.min(MAX_POLL_BACKOFF_MS, Math.max(CHART_REFRESH_MS, pollDelay * 2));
+        setConnection("stale");
+        setMessage(error instanceof Error ? error.message : "Live market data is temporarily unavailable.");
+      } finally {
+        if (active) schedulePoll();
+      }
+    }
+
     async function load() {
-      setMessage("Loading market dataâ€¦"); setQuote(null); setChange(null);
+      setMessage("Loading market data…"); setConnection("loading"); setQuote(null); setChange(null);
+      setHistoryLoading(false);
       // Bars belonging to the previous pair or interval go now, not when the next fetch lands.
       // Until then the chart is empty while the ref still holds the old series, and every reader of
-      // it â€” the pattern export and the drawing overlay â€” would work on the wrong interval.
+      // it — the pattern export and the drawing overlay — would work on the wrong interval.
       barsRef.current = []; setBars([]); barsFor.current = null;
+      historyExhausted = false;
       try {
-        const data = await requestCandles(1000);
+        const data = await requestCandles(HISTORY_PAGE);
         if (!active) return;
         renderBars(data);
         // Show the newest bars rather than the whole history, unless the pane has not been laid
@@ -640,37 +817,31 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
         pendingWindow = data.length;
         applyLatestWindow();
         applyLatestWindowSoon();
-        poller = window.setInterval(() => {
-          // The poll replaces candles only. Drawings live in their own state and are never reloaded
-          // or cleared here; pause while a point is being placed or an existing line is being dragged.
-          if (modeRef.current || pendingRef.current || dragRef.current) return;
-          void requestCandles(2).then((latest) => {
-            if (!active || !latest.length) return;
-            const merged = [...barsRef.current];
-            for (const bar of latest) {
-              const last = merged.at(-1);
-              if (last?.time === bar.time) merged[merged.length - 1] = bar;
-              else if (!last || bar.time > last.time) merged.push(bar);
-            }
-            renderBars(merged);
-          }).catch(() => { if (active) setMessage("Live market data is temporarily unavailable."); });
-        }, CHART_REFRESH_MS);
         setMessage("");
-      } catch (error) { if (active) setMessage(error instanceof Error ? error.message : "Could not load market data."); }
+        setConnection("live");
+        pollDelay = CHART_REFRESH_MS;
+      } catch (error) {
+        if (!active) return;
+        setConnection("stale");
+        setMessage(error instanceof Error ? error.message : "Could not load market data.");
+      }
+      // A failed first load is retried with the same backoff as a failed poll.
+      schedulePoll();
     }
     void load();
     return () => {
       active = false;
-      if (poller !== undefined) window.clearInterval(poller);
+      window.clearTimeout(pollTimer);
       window.clearTimeout(crosshairClearTimer.current);
       crosshairClearTimer.current = undefined;
       equalizeScaleWidths.current = () => {};
+      repaintRef.current = () => {};
       observer.disconnect();
       chart.remove(); macdChart.remove(); rsiChart.remove(); atrChart.remove();
       chartApi.current = null; macdApi.current = null; rsiApi.current = null; atrApi.current = null;
       series.current = null; macdSeries.current = null; rsiSeries.current = null; atrSeries.current = null;
     };
-  }, [symbol, exchange, timeframe, theme, onPriceSelect]);
+  }, [symbol, exchange, timeframe, theme, onPriceSelect, reloadKey]);
 
   useEffect(() => {
     const chart = chartApi.current; const macdChart = macdApi.current; const rsiChart = rsiApi.current; const atrChart = atrApi.current;
@@ -679,15 +850,9 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     const data = bars;
     current.candles.setData(preferences.candleType === "ha" ? heikinAshi(data) : data);
     current.volume.setData(preferences.indicators.vol ? data.map((bar) => ({ time: bar.time, value: bar.volume, color: bar.close >= bar.open ? "rgba(77,148,104,.28)" : "rgba(191,102,88,.28)" })) : []);
-    const closes = data.map((bar) => bar.close);
-    const rsiValues = rsi(closes);
-    const atrValues = atr(data);
-    const macdAll = macdValues(closes);
+    // One shared calculation feeds the panes, the legend and the crosshair values.
+    const { rsi: rsiValues, atr: atrValues, macd: macdAll } = indicatorSet;
     indicatorValues.current = { rsi: rsiValues, atr: atrValues, macd: macdAll };
-    const firstValue = (values: (number | null)[]) => {
-      const index = values.findIndex((value) => value !== null);
-      return index < 0 ? 0 : index;
-    };
     /** Largest recent magnitude, so tiny MACD/ATR values do not collapse to "0.00" on the axes. */
     const maxAbs = (values: (number | null)[], lookback = 200) => {
       let max = 0;
@@ -709,12 +874,12 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     macd.signal.applyOptions({ priceFormat: macdFormat });
     atrPane.line.applyOptions({ priceFormat: valueFormat(maxAbs(atrValues)) });
     paneStarts.current = {
-      macd: firstValue(macdAll.line), rsi: firstValue(rsiValues), atr: firstValue(atrValues),
+      macd: firstValueIndex(macdAll.line), rsi: firstValueIndex(rsiValues), atr: firstValueIndex(atrValues),
     };
     const emaEnabled = preferences.indicators.ema;
-    current.ema100.setData(emaEnabled ? indicatorPoints(data, ema(closes, 100)) : []);
-    current.ema200.setData(emaEnabled ? indicatorPoints(data, ema(closes, 200)) : []);
-    const bands = bollingerBands(data);
+    current.ema100.setData(emaEnabled ? indicatorPoints(data, indicatorSet.ema100) : []);
+    current.ema200.setData(emaEnabled ? indicatorPoints(data, indicatorSet.ema200) : []);
+    const bands = indicatorSet.bands;
     current.bbUpper.setData(preferences.indicators.bb ? indicatorPoints(data, bands.upper) : []);
     current.bbMiddle.setData(preferences.indicators.bb ? indicatorPoints(data, bands.middle) : []);
     current.bbLower.setData(preferences.indicators.bb ? indicatorPoints(data, bands.lower) : []);
@@ -753,13 +918,13 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     // copying the window keeps them on the same stretch of time, future space included.
     if (macdEnabled) copyWindowSoon(chart, macdChart);
     equalizeScaleWidths.current();
-  }, [bars, preferences]);
+  }, [bars, preferences, indicatorSet]);
 
   useEffect(() => {
     const candles = series.current?.candles;
     if (!candles) return;
     const lines = alerts.filter((item) => item.kind === "price" && item.symbol === symbol && item.active && !item.line_type && item.price);
-    const rendered = lines.map((item) => candles.createPriceLine({ price: Number(item.price), color: colors.amber, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `Alert Â· ${item.condition.replaceAll("_", " ")}` }));
+    const rendered = lines.map((item) => candles.createPriceLine({ price: Number(item.price), color: colors.amber, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `Alert · ${item.condition.replaceAll("_", " ")}` }));
     return () => rendered.forEach((line) => candles.removePriceLine(line));
   }, [alerts, symbol, theme]);
 
@@ -803,7 +968,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
         && barsFor.current?.symbol === symbol
         && barsFor.current?.timeframe === timeframe;
       if (!ready) {
-        setCandlestickNote(`Waiting for ${symbol} ${timeframe.toUpperCase()} candlesâ€¦`);
+        setCandlestickNote(`Waiting for ${symbol} ${timeframe.toUpperCase()} candles…`);
         schedule(5000);
         return;
       }
@@ -817,10 +982,20 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
   useEffect(() => {
     const chart = chartApi.current; const canvasElement = canvas.current; const current = series.current;
     if (!chart || !canvasElement || !current) return;
-    let animation = 0;
+    let frame = 0;
+    let disposed = false;
+    /** Changes whenever the chart's pixel mapping moves, which is exactly when the overlay is stale. */
+    let signature = "";
     const paint = () => {
       const bounds = canvasElement.getBoundingClientRect(); const ratio = window.devicePixelRatio || 1;
-      canvasElement.width = Math.round(bounds.width * ratio); canvasElement.height = Math.round(bounds.height * ratio);
+      const pixelWidth = Math.round(bounds.width * ratio);
+      const pixelHeight = Math.round(bounds.height * ratio);
+      const layer = patternCanvas.current;
+      // Assigning width/height clears the canvas, so it only happens when the pane actually resized.
+      if (canvasElement.width !== pixelWidth || canvasElement.height !== pixelHeight) {
+        canvasElement.width = pixelWidth; canvasElement.height = pixelHeight;
+        if (layer) { layer.width = pixelWidth; layer.height = pixelHeight; }
+      }
       const context = canvasElement.getContext("2d"); if (!context) return;
       context.setTransform(ratio, 0, 0, ratio, 0, 0); context.clearRect(0, 0, bounds.width, bounds.height);
       // Key levels sit under user drawings: their bands should not make the editable lines harder
@@ -857,7 +1032,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
           context.beginPath(); context.moveTo(0, y + 0.5); context.lineTo(plotWidth, y + 0.5); context.stroke();
           context.beginPath(); context.moveTo(0, y + height - 0.5); context.lineTo(plotWidth, y + height - 0.5); context.stroke();
           context.setLineDash([]);
-          const label = `${level.kind === "support" ? "Support" : "Resistance"} ${fmt(level.price)} Â· ${level.strength}/100`;
+          const label = `${level.kind === "support" ? "Support" : "Resistance"} ${fmt(level.price)} · ${level.strength}/100`;
           context.font = '600 10px "Geist", system-ui, sans-serif';
           const pillWidth = context.measureText(label).width + 14;
           // Right-aligned keeps the pills clear of the OHLC legend in the chart's top-left corner.
@@ -1009,7 +1184,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
               Math.max(0, width - line.width),
               Math.max(0, height - line.width),
             );
-            const label = `${zone.label} Â· ${fmt(zone.price)}`;
+            const label = `${zone.label} · ${fmt(zone.price)}`;
             context.font = '600 10px "Geist", system-ui, sans-serif';
             const textWidth = context.measureText(label).width;
             const pillWidth = textWidth + 14;
@@ -1055,25 +1230,25 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
       }
       // The pattern gets its own layer above the chart rather than joining the drawing overlay,
       // because the exported picture composites that overlay and would pick the pattern up twice.
-      const layer = patternCanvas.current;
       if (layer) {
-        layer.width = Math.round(bounds.width * ratio); layer.height = Math.round(bounds.height * ratio);
         const patternContext = layer.getContext("2d");
         if (patternContext) {
           patternContext.setTransform(ratio, 0, 0, ratio, 0, 0); patternContext.clearRect(0, 0, bounds.width, bounds.height);
+          // The layer covers the whole canvas, price axis included. Pattern geometry, captions and
+          // the candlestick band are clipped to the plot so a projected target or a right-edge
+          // match cannot paint across the axis labels.
+          const plotWidth = chart.timeScale().width() || bounds.width;
+          const overlayRect = { x: 0, y: 0, width: plotWidth, height: bounds.height };
           // Drawn by the same routine the export uses, so screen and picture are identical.
           if (patternOnChart) {
             paintPattern(patternContext, patternOnChart, (point) => {
               const x = drawingCoordinate(chart, point.time, barsRef.current, timeframe);
               const y = current.candles.priceToCoordinate(point.price);
               return x === null || y === null ? null : { x, y };
-            }, { x: 0, y: 0, width: bounds.width, height: bounds.height }, ratio, colors);
+            }, overlayRect, ratio, colors);
             // The name belongs to the chart, not to the controls: the pill sits at the top of the
             // price pane and follows the bullish/bearish accent of the geometry.
-            paintPatternCaption(
-              patternContext, patternOnChart,
-              { x: 0, y: 0, width: bounds.width, height: bounds.height }, ratio, colors,
-            );
+            paintPatternCaption(patternContext, patternOnChart, overlayRect, ratio, colors);
           }
           // The monitor's shape shares the same overlay, drawn second so its caption sits on top.
           if (candlestickMatch) {
@@ -1082,32 +1257,68 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
               candlestickMatch,
               (time) => drawingCoordinate(chart, time, barsRef.current, timeframe),
               (value) => current.candles.priceToCoordinate(value),
-              { x: 0, y: 0, width: bounds.width, height: bounds.height },
+              overlayRect,
               ratio,
               colors,
             );
           }
         }
       }
-      animation = requestAnimationFrame(paint);
     };
-    paint(); return () => cancelAnimationFrame(animation);
+    /**
+     * The overlay is painted in pixels, so it is only correct while the chart's pixel mapping is
+     * unchanged. Comparing the coordinates of two reference prices catches a pan, a zoom and a
+     * price-axis drag (which fires no event of its own) without repainting every frame.
+     */
+    const tick = () => {
+      frame = requestAnimationFrame(tick);
+      if (disposed) return;
+      const reference = barsRef.current.at(-1)?.close ?? 1;
+      const upper = current.candles.priceToCoordinate(reference);
+      const lower = current.candles.priceToCoordinate(reference * 1.01);
+      const left = chart.timeScale().logicalToCoordinate(0 as Logical);
+      const next = `${upper}|${lower}|${left}|${chart.timeScale().width()}|${canvasElement.clientWidth}`;
+      if (next === signature) return;
+      signature = next;
+      paint();
+    };
+    // Event handlers only invalidate; the next frame does the drawing.
+    repaintRef.current = () => { signature = ""; };
+    tick();
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(frame);
+      repaintRef.current = () => {};
+    };
   }, [bars, drawings, symbol, selected, theme, timeframe, keyLevels, trendBias, alerts, patternOnChart, candlestickMatch]);
 
+  /**
+   * One batched quote request covers the watchlist and the chart's pair. A failure keeps the last
+   * values on screen but marks them stale, which is more useful than blanking the whole column.
+   */
   useEffect(() => {
-    let valid = true;
+    let active = true;
+    let timer: number | undefined;
     async function updateQuotes() {
       const symbols = [...new Set([...watchlist, symbol])];
-      await Promise.all(symbols.map(async (pair) => {
-        try {
-          const item = await fetchQuote(pair, exchange);
-          if (valid) setWatchQuotes((quotes) => ({ ...quotes, [pair]: item }));
-        } catch { /* A missing quote does not interrupt the chart. */ }
-      }));
+      if (!symbols.length) return;
+      try {
+        const quotes = await fetchQuotes(symbols, exchange);
+        if (!active) return;
+        setWatchQuotes((current) => ({ ...current, ...quotes }));
+        setQuotesStale(false);
+      } catch {
+        if (active) setQuotesStale(true);
+      } finally {
+        if (active) timer = window.setTimeout(() => void updateQuotes(), QUOTE_REFRESH_MS);
+      }
     }
-    void updateQuotes(); const timer = window.setInterval(() => void updateQuotes(), 8000);
-    return () => { valid = false; window.clearInterval(timer); };
+    void updateQuotes();
+    return () => { active = false; window.clearTimeout(timer); };
   }, [symbol, watchlist, exchange]);
+
+  // A quote from the other exchange describes a different market, so it is dropped on a switch.
+  useEffect(() => { setWatchQuotes({}); setQuotesStale(false); }, [exchange]);
 
   // Restore which rows had their scan switched on. It has to be read in an effect rather than in
   // useState, because the dashboard is prerendered with no storage and would otherwise mismatch.
@@ -1141,7 +1352,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
             // A pair without a futures market still gets the candle columns.
             fetchOpenInterest(pair, timeframe, WATCH_OI_POINTS, exchange).catch(() => []),
           ]);
-          if (active) setWatchScans((all) => ({ ...all, [pair]: watchMetrics(data, openInterest) }));
+          if (active) setWatchScans((all) => ({ ...all, [pair]: watchMetrics(data, openInterest, timeframe) }));
         } catch {
           if (active) setWatchScans((all) => ({ ...all, [pair]: emptyWatchMetrics }));
         }
@@ -1170,7 +1381,10 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     if (!raw.length || !owner || owner.symbol !== symbol || owner.timeframe !== timeframe) return [];
     // Detect on the candles the user is looking at. In Heikin Ashi mode the chart series is the
     // transformed data, so raw swings would sit between the displayed candles and look misplaced.
-    const data = preferencesRef.current.candleType === "ha" ? heikinAshi(raw) : raw;
+    // Only completed candles are read: a still-forming bar repaints and would repaint the shape.
+    const closed = closedBars(raw, timeframe);
+    if (!closed.length) return [];
+    const data = preferencesRef.current.candleType === "ha" ? heikinAshi(closed) : closed;
     return data.slice(-PATTERN_RECENT_BARS).map((bar) => ({ ...bar, time: Number(bar.time) }));
   }
   /** One screenshot pass over the live chart, shared by every picture a run paints. */
@@ -1210,7 +1424,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     context.textAlign = "left";
     context.fillStyle = colors.text;
     context.font = `600 ${Math.round(17 * ratio)}px "Geist", system-ui, sans-serif`;
-    context.fillText(`${symbol} Â· ${timeframe.toUpperCase()} Â· ${match.label}${match.forming ? " (forming)" : ""}`, padding, titleHeight / 2);
+    context.fillText(`${symbol} · ${timeframe.toUpperCase()} · ${match.label}${match.forming ? " (forming)" : ""}`, padding, titleHeight / 2);
     context.font = `400 ${Math.round(10 * ratio)}px "DM Mono", ui-monospace, monospace`;
     context.textAlign = "right";
     context.fillText(`${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`, width - padding, titleHeight / 2);
@@ -1230,7 +1444,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
       const x = drawingCoordinate(chart, point.time, barsRef.current, timeframe);
       const y = candles.priceToCoordinate(point.price);
       return x === null || y === null ? null : { x: padding + x * ratio, y: top + y * ratio };
-    }, { x: padding, y: top, width: price.width, height: price.height }, ratio, colors);
+    }, { x: padding, y: top, width: chart.timeScale().width() * ratio || price.width, height: price.height }, ratio, colors);
     context.strokeStyle = colors.line;
     context.lineWidth = Math.max(1, ratio);
     context.strokeRect(0.5, 0.5, width - 1, height - 1);
@@ -1251,7 +1465,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     const recent = recentPatternBars();
     // Nothing to measure means the chart is still between pairs or intervals, which is not the
     // same as finding no pattern in the bars that are loaded.
-    if (!recent.length) { setPatternNote(`Loading ${symbol} on ${timeframe.toUpperCase()}â€¦ try again in a moment.`); return; }
+    if (!recent.length) { setPatternNote(`Loading ${symbol} on ${timeframe.toUpperCase()}… try again in a moment.`); return; }
     const matches = detectPatterns(PATTERN_KEYS, recent);
     if (!matches.length) {
       setPatternNote(`None of the patterns matched the latest ${PATTERN_RECENT_BARS} candles. Try another timeframe.`);
@@ -1263,7 +1477,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     if (!ready.length) { setPatternNote("This browser could not create the picture."); return; }
     setPatternBusy(true);
     const fileName = patternFileName(ready[0].match.key, symbol, timeframe);
-    setPatternNote(`Drawing ${ready.length} pattern${ready.length === 1 ? "" : "s"}â€¦`);
+    setPatternNote(`Drawing ${ready.length} pattern${ready.length === 1 ? "" : "s"}…`);
     try {
       // Browsers block a burst of downloads, so a run hands over its first picture and leaves the
       // rest to the Pattern tab.
@@ -1353,7 +1567,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     context.textAlign = "left";
     context.fillStyle = colors.text;
     context.font = `600 ${Math.round(17 * ratio)}px "Geist", system-ui, sans-serif`;
-    context.fillText(`${symbol} Â· ${timeframe.toUpperCase()} Â· ${match.label}`, padding, titleHeight / 2);
+    context.fillText(`${symbol} · ${timeframe.toUpperCase()} · ${match.label}`, padding, titleHeight / 2);
     context.font = `400 ${Math.round(10 * ratio)}px "DM Mono", ui-monospace, monospace`;
     context.textAlign = "right";
     context.fillText(`${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`, width - padding, titleHeight / 2);
@@ -1378,7 +1592,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
         const y = candles.priceToCoordinate(value);
         return y === null ? null : top + y * ratio;
       },
-      { x: padding, y: top, width: price.width, height: price.height },
+      { x: padding, y: top, width: chart.timeScale().width() * ratio || price.width, height: price.height },
       ratio,
       colors,
     );
@@ -1392,10 +1606,10 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     const owner = barsFor.current;
     return barsRef.current.length > 0 && owner?.symbol === symbol && owner?.timeframe === timeframe;
   }
-  /** Detection shared by the monitor overlay and the explicit picture button. */
+  /** Detection shared by the monitor overlay and the explicit picture button, on closed candles. */
   function detectCandlestickShape() {
-    const raw = barsRef.current;
-    const displayed = preferencesRef.current.candleType === "ha" ? heikinAshi(raw) : raw;
+    const closed = closedBars(barsRef.current, timeframe);
+    const displayed = preferencesRef.current.candleType === "ha" ? heikinAshi(closed) : closed;
     return detectCandlestickPattern(displayed);
   }
   /**
@@ -1405,14 +1619,21 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
    */
   function previewCandlesticks() {
     if (!candlestickShapeReady()) {
-      setCandlestickNote(`Waiting for ${symbol} ${timeframe.toUpperCase()} candlesâ€¦`);
+      setCandlestickNote(`Waiting for ${symbol} ${timeframe.toUpperCase()} candles…`);
       return;
     }
     const match = detectCandlestickShape();
     setCandlestickMatch(match);
-    setCandlestickNote(
-      match ? "" : `No candlestick pattern in the latest ${CANDLESTICK_RECENT_BARS} candles.`,
-    );
+    if (!match) {
+      setCandlestickNote(`No candlestick pattern in the latest ${CANDLESTICK_RECENT_BARS} candles.`);
+      return;
+    }
+    // The same formation must not be announced again on the next pass: name, direction, interval,
+    // the completing candle's timestamp and its close are all that a repeat would repeat.
+    const signature = `${symbol}|${timeframe}|${match.key}|${match.bias}|${match.endTime}`;
+    const detail = `${match.label} · ${match.bias} · ${timeframe.toUpperCase()} · completed ${candleTimeLabel(match.endTime, timeframe)} at ${fmt(match.formationPrice)}`;
+    setCandlestickNote(formationSeen.current.has(signature) ? `${detail} · already reported` : detail);
+    formationSeen.current.add(signature);
   }
   /**
    * The picture button: paints the newest shape, then captures and stores it. This is the only
@@ -1421,18 +1642,20 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
   async function captureCandlestickPicture() {
     const chart = chartApi.current;
     if (!chart || !candlestickShapeReady()) {
-      setCandlestickNote(`Waiting for ${symbol} ${timeframe.toUpperCase()} candlesâ€¦`);
+      setCandlestickNote(`Waiting for ${symbol} ${timeframe.toUpperCase()} candles…`);
       return;
     }
     const match = detectCandlestickShape();
     setCandlestickMatch(match);
-    setCandlestickNote("");
     if (!match) {
       setCandlestickNote(
         `No candlestick pattern in the latest ${CANDLESTICK_RECENT_BARS} candles.`,
       );
       return;
     }
+    setCandlestickNote(
+      `${match.label} · ${match.bias} · ${timeframe.toUpperCase()} · completed ${candleTimeLabel(match.endTime, timeframe)} at ${fmt(match.formationPrice)}`,
+    );
     setCandlestickBusy(true);
     try {
       // The overlay paints on the next frames, so let it land before taking the picture.
@@ -1457,7 +1680,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
       setAnnotateTab("candlestick");
       setCandlestickNote(stored
         ? `Saved ${match.label} to Candlesticks.`
-        : `Saved ${fileName} Â· the server copy failed.`);
+        : `Saved ${fileName} · the server copy failed.`);
     } finally { setCandlestickBusy(false); }
   }
   async function deleteCandlestickShot(id: number) {
@@ -1512,7 +1735,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     if (!pair) { setWatchNotice("Enter a market symbol, for example ADAUSDT."); return; }
     if (pair.length > 24) { setWatchNotice("Use a symbol of 24 characters or fewer."); return; }
     if (watchlist.includes(pair)) { setWatchNotice(`${pair} is already on the watchlist.`); return; }
-    setWatchNotice(`Saving ${pair}â€¦`);
+    setWatchNotice(`Saving ${pair}…`);
     try {
       // The database is the source of truth, so the pair is stored before anything else is attempted.
       const response = await fetch(`${API}/watchlist/`, {
@@ -1752,19 +1975,41 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     [bars, preferences.candleType],
   );
   const legendBar = legendIndex >= 0 ? displayedBars[legendIndex] ?? null : null;
-  const indicatorLegend = useMemo(() => {
-    if (!bars.length) return null;
-    const closes = bars.map((bar) => bar.close);
-    return { macd: macdValues(closes), rsi: rsi(closes), atr: atr(bars), ema100: ema(closes, 100) };
-  }, [bars]);
-  const legendMacd = indicatorLegend && legendIndex >= 0 ? {
-    line: indicatorLegend.macd.line[legendIndex] ?? null,
-    signal: indicatorLegend.macd.signal[legendIndex] ?? null,
-    histogram: indicatorLegend.macd.histogram[legendIndex] ?? null,
+  // The newest bar is still forming until its close time passes; the legend says so rather than
+  // presenting a value that can still change as if it were final.
+  const liveIndex = liveBarIndex(bars, timeframe);
+  const legendLive = legendIndex >= 0 && legendIndex === liveIndex;
+  const legendMacd = legendIndex >= 0 ? {
+    line: indicatorSet.macd.line[legendIndex] ?? null,
+    signal: indicatorSet.macd.signal[legendIndex] ?? null,
+    histogram: indicatorSet.macd.histogram[legendIndex] ?? null,
   } : null;
-  const legendRsi = indicatorLegend && legendIndex >= 0 ? indicatorLegend.rsi[legendIndex] ?? null : null;
-  const legendAtr = indicatorLegend && legendIndex >= 0 ? indicatorLegend.atr[legendIndex] ?? null : null;
+  const legendRsi = legendIndex >= 0 ? indicatorSet.rsi[legendIndex] ?? null : null;
+  const legendAtr = legendIndex >= 0 ? indicatorSet.atr[legendIndex] ?? null : null;
   const legendTime = legendBar ? Number(legendBar.time) : null;
+  /** Signals and trade levels read the last completed candle, never the bar that is still forming. */
+  const lastClosedIndex = closedSignalBars.length - 1;
+  const lastClosed = (values: readonly (number | null)[]) =>
+    lastClosedIndex >= 0 ? values[lastClosedIndex] ?? null : null;
+  const patternDetail = patternOnChart
+    ? [
+      matchName(patternOnChart),
+      patternOnChart.summary,
+      patternOnChart.entry && `Entry: ${patternOnChart.entry}`,
+      patternOnChart.invalidation && `Invalidation: ${patternOnChart.invalidation}`,
+    ].filter(Boolean).join(" · ")
+    : "";
+  /**
+   * The conditions behind the trend reading: direction is context from completed higher-timeframe
+   * candles, not an entry trigger. The per-bar slope and pivot count make the fit inspectable.
+   */
+  const trendBiasDetail = preferences.indicators.trendBias && trendBias.length
+    ? trendBias.map((bias) => {
+      const line = bias.lines.find((item) => item.kind === "high") ?? bias.lines[0];
+      const slope = line.slopePctPerBar;
+      return `${bias.timeframe.toUpperCase()} ${bias.direction} ${slope >= 0 ? "+" : ""}${slope.toFixed(2)}%/bar (${line.pivots} pivots)`;
+    }).join(" · ")
+    : "";
   const symbolDrawings = drawings.filter((line) => line.symbol === symbol);
   /** Newest pictures first, with the current pair's group ahead of the rest of the watchlist.
    The API already answers newest first, so grouping only has to keep that order. */
@@ -1786,6 +2031,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
           <MarketHeader
             symbol={symbol}
             exchange={exchange}
+            connection={connection}
             quote={quote}
             dayChange={dayChange}
             events={events}
@@ -1819,6 +2065,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
               running={candlestickRunning}
               busy={candlestickBusy}
               note={candlestickNote}
+              detail={candlestickNote}
               onToggle={toggleCandlestickMonitor}
               onCapture={() => void captureCandlestickPicture()}
               onOpenGuide={() => setCandlestickGuideOpen(true)}
@@ -1840,8 +2087,14 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
             legendMacd={legendMacd}
             legendRsi={legendRsi}
             legendAtr={legendAtr}
+            live={legendLive}
             message={message}
             patternNote={patternNote}
+            patternDetail={patternDetail}
+            trendBiasDetail={trendBiasDetail}
+            connection={connection}
+            historyLoading={historyLoading}
+            onRetry={() => setReloadKey((key) => key + 1)}
             onPointerDown={handleDrawingPointerDown}
             onPointerMove={handleDrawingPointerMove}
             onPointerUp={handleDrawingPointerUp}
@@ -1856,6 +2109,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
             timeframe={timeframe}
             current={symbol}
             loaded={watchlistLoaded}
+            stale={quotesStale}
             notice={watchNotice}
             draft={watchDraft}
             onSelect={onSymbolChange}
@@ -1895,9 +2149,9 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
             candlestickArmRef={candlestickArmRef}
             calculator={{
               price: quote ?? bars.at(-1)?.close ?? null,
-              ema100: indicatorLegend?.ema100.at(-1) ?? null,
-              rsi14: indicatorLegend?.rsi.at(-1) ?? null,
-              atr14: indicatorLegend?.atr.at(-1) ?? null,
+              ema100: lastClosed(indicatorSet.ema100),
+              rsi14: lastClosed(indicatorSet.rsi),
+              atr14: lastClosed(indicatorSet.atr),
             }}
             hasEntryDrawing={symbolDrawings.some((line) => line.origin === "calculator")}
             onDrawEntry={drawTradeEntry}

@@ -58,6 +58,10 @@ export type PatternMatch = {
   forming: boolean;
   /** Plain sentence naming the level that confirms the shape, when there is one. */
   trigger?: string;
+  /** Level at which the shape is traded once it confirms. */
+  entry?: string;
+  /** Level that proves the reading wrong. */
+  invalidation?: string;
 };
 
 type Pivot = { index: number; price: number; kind: "peak" | "trough" };
@@ -95,6 +99,24 @@ function brokeAgainst(bars: PatternBar[], extreme: "peak" | "trough", levels: nu
 }
 
 /**
+ * First bar after `from` that closes beyond the level, or null when it never does. The index is
+ * what names the confirmation price: a sloped line is at a different level on the break bar than
+ * on the shape's last swing.
+ */
+function firstCloseBeyond(
+  bars: PatternBar[],
+  from: number,
+  direction: "above" | "below",
+  levelAt: (index: number) => number,
+) {
+  for (let index = Math.max(0, from + 1); index < bars.length; index += 1) {
+    const close = bars[index].close;
+    if (direction === "above" ? close > levelAt(index) : close < levelAt(index)) return index;
+  }
+  return null;
+}
+
+/**
  * True when a bar after `from` has closed beyond the level. Confirmation only counts after the
  * last swing of the shape: a neckline break that happened before the right shoulder does not
  * complete the pattern, it just means the shape failed on the way there.
@@ -105,11 +127,7 @@ function closedBeyond(
   direction: "above" | "below",
   levelAt: (index: number) => number,
 ) {
-  for (let index = Math.max(0, from + 1); index < bars.length; index += 1) {
-    const close = bars[index].close;
-    if (direction === "above" ? close > levelAt(index) : close < levelAt(index)) return true;
-  }
-  return false;
+  return firstCloseBeyond(bars, from, direction, levelAt) !== null;
 }
 
 function priceText(value: number) {
@@ -314,8 +332,10 @@ function buildThreeSwing(key: PatternKey, bars: PatternBar[], found: ThreeSwing)
   const neckline = neckTrend(found);
   const missingShoulder = right === null;
   // A printed right shoulder is only half the pattern: the neckline break is the confirmation.
-  const confirmed = right !== null && neckline !== null
-    && closedBeyond(bars, right.index, bearish ? "below" : "above", (index) => neckline.at(index));
+  const breakIndex = right !== null && neckline !== null
+    ? firstCloseBeyond(bars, right.index, bearish ? "below" : "above", (index) => neckline.at(index))
+    : null;
+  const confirmed = breakIndex !== null;
   const forming = missingShoulder || !confirmed;
   const choice = choices.get(key)!;
   const segments: PatternSegment[] = [
@@ -333,6 +353,8 @@ function buildThreeSwing(key: PatternKey, bars: PatternBar[], found: ThreeSwing)
   const breakWord = bearish ? "below" : "above";
   let summary = `${choice.label} over ${span} bars.`;
   let trigger: string | undefined;
+  let entry: string | undefined;
+  let invalidation = `Close ${bearish ? "above" : "below"} ${priceText(head.price)} against the head.`;
   if (forming) {
     summary = `${choice.label} forming over ${span} bars`;
     if (!missingShoulder) summary += " · awaiting neckline break";
@@ -360,9 +382,13 @@ function buildThreeSwing(key: PatternKey, bars: PatternBar[], found: ThreeSwing)
       // the neckline at the latest bar; a sloping neckline otherwise quotes a future price.
       const neckNow = neckline.at(bars.length - 1);
       trigger = `Close ${breakWord} ${priceText(neckNow)} to confirm.`;
+      entry = trigger;
       summary = `${summary} · break ${breakWord} ${priceText(neckNow)} · target ${priceText(target)}`;
     } else {
       summary = `${choice.label} over ${span} bars · neckline ${priceText(neckEnd)} · target ${priceText(target)}`;
+      entry = breakIndex !== null && neckline
+        ? `Neckline broke ${breakWord} ${priceText(neckline.at(breakIndex))}.`
+        : undefined;
     }
   }
   const markers: PatternMarker[] = [
@@ -374,7 +400,7 @@ function buildThreeSwing(key: PatternKey, bars: PatternBar[], found: ThreeSwing)
   ];
   return {
     label: choice.label, bias: choice.bias, segments, forming, trigger, markers,
-    labels, summary, key,
+    labels, summary, key, entry, invalidation,
   };
 }
 
@@ -469,6 +495,11 @@ function buildDoubleSwing(key: PatternKey, bars: PatternBar[], found: DoubleSwin
   let summary = `${choice.label}${forming ? " forming" : ""} over ${(second?.index ?? middle.index) - first.index} bars`;
   if (forming && !missingSecond) summary += " · awaiting neckline break";
   let trigger: string | undefined;
+  let entry: string | undefined;
+  const failureLevel = extreme === "peak"
+    ? Math.max(first.price, second?.price ?? first.price)
+    : Math.min(first.price, second?.price ?? first.price);
+  const invalidation = `Close ${bearish ? "above" : "below"} ${priceText(failureLevel)} invalidates both ${bearish ? "tops" : "bottoms"}.`;
   const height = level ? Math.abs(level.at(edge) - neckline.at(edge)) : 0;
   if (level) {
     segments.push({ from: { time: timeAt(bars, first.index), price: level.at(first.index) }, to: { time: timeAt(bars, edge), price: level.at(edge) }, role: "boundary" });
@@ -482,9 +513,11 @@ function buildDoubleSwing(key: PatternKey, bars: PatternBar[], found: DoubleSwin
     );
     if (forming) {
       trigger = `Close ${bearish ? "below" : "above"} ${priceText(neckline.at(edge))} to confirm.`;
+      entry = trigger;
       summary += ` · break ${bearish ? "below" : "above"} ${priceText(neckline.at(edge))}`;
     } else {
       summary += ` · neckline ${priceText(neckline.at(edge))}`;
+      entry = `Reaction level broke at ${priceText(neckline.at(edge))}.`;
     }
     summary += ` · target ${priceText(target)}`;
   }
@@ -495,7 +528,7 @@ function buildDoubleSwing(key: PatternKey, bars: PatternBar[], found: DoubleSwin
   ];
   return {
     label: choice.label, bias: choice.bias, segments, forming, trigger, markers,
-    labels, summary, key,
+    labels, summary, key, entry, invalidation,
   };
 }
 
@@ -565,14 +598,21 @@ function findFlag(bars: PatternBar[], key: "bull_flag" | "bear_flag") {
         { time: timeAt(bars, last + PROJECTION_BARS), price: target, text: "Target" },
       ];
       // A flag only resolves once price leaves the channel, so it is always reported as forming.
+      // The confirming level is the channel edge where price is now; quoting the edge at the
+      // projected end of the drawing would name a price that does not exist yet.
+      const triggerLevel = rising ? upper.at(last) : lower.at(last);
       const trigger = rising
-        ? `Close above ${priceText(upper.at(last + PROJECTION_BARS))} to confirm.`
-        : `Close below ${priceText(lower.at(last + PROJECTION_BARS))} to confirm.`;
+        ? `Close above ${priceText(triggerLevel)} to confirm.`
+        : `Close below ${priceText(triggerLevel)} to confirm.`;
+      const invalidation = rising
+        ? `Close below ${priceText(pole.low)} (pole low) invalidates the flag.`
+        : `Close above ${priceText(pole.high)} (pole high) invalidates the flag.`;
       best = {
         score,
         result: {
           key, label: choice.label, bias: choice.bias, segments, markers, labels, forming: true, trigger,
-          summary: `${choice.label} · pole ${(move * 100).toFixed(1)}% over ${length} bars, ${last - poleEnd}-bar ${rising ? "pullback" : "bounce"} · break ${rising ? "above" : "below"} ${priceText(rising ? upper.at(last + PROJECTION_BARS) : lower.at(last + PROJECTION_BARS))} · target ${priceText(target)}`,
+          entry: trigger, invalidation,
+          summary: `${choice.label} · pole ${(move * 100).toFixed(1)}% over ${length} bars, ${last - poleEnd}-bar ${rising ? "pullback" : "bounce"} · break ${rising ? "above" : "below"} ${priceText(triggerLevel)} · target ${priceText(target)}`,
         },
       };
     }
@@ -627,10 +667,17 @@ function findConvergence(bars: PatternBar[], swings: Pivot[], kind: "ascending" 
     // on the way to the last pivot would be mistaken for the resolution that comes after it.
     let brokeUp = false;
     let brokeDown = false;
+    let breakIndex: number | null = null;
     for (let index = lastSwing + 1; index <= last; index += 1) {
       const close = bars[index].close;
-      if (close > upper.at(index) + slack) brokeUp = true;
-      if (close < lower.at(index) - slack) brokeDown = true;
+      if (close > upper.at(index) + slack) {
+        brokeUp = true;
+        if (breakIndex === null) breakIndex = index;
+      }
+      if (close < lower.at(index) - slack) {
+        brokeDown = true;
+        if (breakIndex === null) breakIndex = index;
+      }
     }
     // Ascending triangles and falling wedges resolve upward, the other two downward.
     const upside = kind === "ascending" || kind === "falling";
@@ -670,10 +717,21 @@ function findConvergence(bars: PatternBar[], swings: Pivot[], kind: "ascending" 
     const bias = kind === "symmetrical" && resolution
       ? resolution === "up" ? "bullish" : "bearish"
       : choice.bias;
+    const entry = forming
+      ? trigger
+      : `Break ${resolution === "up" ? "above" : "below"} ${priceText(resolution === "up" ? upper.at(breakIndex ?? last) : lower.at(breakIndex ?? last))} confirmed.`;
+    // The pattern's thesis fails when price closes back through the side it broke from. A
+    // symmetrical triangle with no resolution yet has no side, so neither edge invalidates it;
+    // only a close back inside the channel after a breakout undoes that breakout.
+    const invalidation = forming && kind === "symmetrical"
+      ? `A close back inside ${priceText(lower.at(last))}–${priceText(upper.at(last))} invalidates a breakout.`
+      : bias === "bullish"
+        ? `Close back below ${priceText(lower.at(last))} invalidates the upside setup.`
+        : `Close back above ${priceText(upper.at(last))} invalidates the downside setup.`;
     best = {
       score,
       result: {
-        key: choice.value, label: choice.label, bias, segments, forming, trigger,
+        key: choice.value, label: choice.label, bias, segments, forming, trigger, entry, invalidation,
         markers: [
           ...highs.map((pivot) => ({ time: timeAt(bars, pivot.index), price: pivot.price, kind: "peak" as const })),
           ...lows.map((pivot) => ({ time: timeAt(bars, pivot.index), price: pivot.price, kind: "trough" as const })),

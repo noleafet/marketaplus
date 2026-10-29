@@ -97,3 +97,43 @@ export function copyWindowSoon(from: IChartApi, to: IChartApi) {
     }
   });
 }
+
+/** A drawing already projected into screen pixels, ready for hit-testing. */
+export type ScreenLine = { id: string; x1: number; y1: number; x2: number; y2: number };
+
+export function distanceToSegment(
+  x: number,
+  y: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const lengthSquared = dx * dx + dy * dy;
+  const fraction = lengthSquared
+    ? Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / lengthSquared))
+    : 0;
+  return Math.hypot(x - (x1 + fraction * dx), y - (y1 + fraction * dy));
+}
+
+/**
+ * The drawing under a pointer, so a line can be selected by clicking it on the chart instead of
+ * only from the side panel. The nearest line inside the threshold wins, which keeps overlapping
+ * trendlines predictable.
+ */
+export function hitTestDrawings(
+  lines: readonly ScreenLine[],
+  x: number,
+  y: number,
+  threshold = 8,
+): string | null {
+  let best: { id: string; distance: number } | null = null;
+  for (const line of lines) {
+    const distance = distanceToSegment(x, y, line.x1, line.y1, line.x2, line.y2);
+    if (distance > threshold) continue;
+    if (!best || distance < best.distance) best = { id: line.id, distance };
+  }
+  return best?.id ?? null;
+}

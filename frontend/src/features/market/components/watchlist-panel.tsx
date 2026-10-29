@@ -12,6 +12,8 @@ type Props = {
   timeframe: Timeframe;
   current: string;
   loaded: boolean;
+  /** True when the latest batched quote refresh failed; the prices shown are the last known ones. */
+  stale: boolean;
   notice: string;
   draft: string;
   onSelect: (pair: string) => void;
@@ -66,6 +68,7 @@ export default function WatchlistPanel({
   timeframe,
   current,
   loaded,
+  stale,
   notice,
   draft,
   onSelect,
@@ -114,6 +117,11 @@ export default function WatchlistPanel({
         </div>
         <span className="count">{watchlist.length} PAIRS</span>
       </div>
+      {stale && (
+        <p className="watch-stale" role="status">
+          Quote refresh failed · showing the last known prices
+        </p>
+      )}
       {watchlist.length > 0 && (
         <div className="watch-table">
           <div className="watch-head">
@@ -157,7 +165,7 @@ export default function WatchlistPanel({
                     {pair}
                   </button>
                   <span>{fmt(quote?.price ?? null)}</span>
-                  <small className={(quote?.change ?? 0) >= 0 ? "positive" : "negative"}>
+                  <small className={quote ? (quote.change >= 0 ? "positive" : "negative") : ""}>
                     {quote ? `${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(2)}%` : "–"}
                   </small>
                   {on

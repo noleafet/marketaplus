@@ -7,6 +7,8 @@ import MarketEvents from "./market-events";
 type Props = {
   symbol: string;
   exchange: Exchange;
+  /** Whether the newest candles came from a successful poll, are still loading, or went stale. */
+  connection?: "loading" | "live" | "stale";
   quote: number | null;
   dayChange: number | null;
   events: MarketEvent[];
@@ -18,9 +20,16 @@ type Props = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
+const CONNECTION_TITLES = {
+  loading: "Fetching candles from the exchange.",
+  live: "The newest candles were confirmed by the latest refresh.",
+  stale: "The last refresh failed; the chart shows the last good candles.",
+} as const;
+
 export default function MarketHeader({
   symbol,
   exchange,
+  connection = "live",
   quote,
   dayChange,
   events,
@@ -34,7 +43,15 @@ export default function MarketHeader({
   return (
     <div className="market-head">
       <div className="market-identity">
-        <span className="eyebrow">LIVE MARKET · {exchange.toUpperCase()} SPOT</span>
+        <span className="eyebrow">
+          LIVE MARKET · {exchange.toUpperCase()} SPOT
+          <span
+            className={`chart-connection ${connection}`}
+            title={CONNECTION_TITLES[connection]}
+          >
+            {connection === "live" ? "LIVE" : connection === "loading" ? "LOADING" : "STALE"}
+          </span>
+        </span>
         <div>
           <strong>{symbol}</strong>
           {quote !== null && <b>{fmt(quote)}</b>}
@@ -60,6 +77,7 @@ export default function MarketHeader({
           {chartIntervals.map((interval) => (
             <button
               key={interval}
+              aria-pressed={timeframe === interval}
               className={timeframe === interval ? "chosen" : ""}
               onClick={() => onTimeframeChange(interval)}
             >

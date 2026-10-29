@@ -37,6 +37,28 @@ async function readJson<T>(response: Response): Promise<T | null> {
   }
 }
 
+/** A market-data failure that keeps the HTTP status, so callers can back off on rate limits. */
+export class MarketDataError extends Error {
+  readonly status: number;
+  constructor(message: string, status = 0) {
+    super(message);
+    this.name = "MarketDataError";
+    this.status = status;
+  }
+}
+
+export function isRateLimitError(error: unknown) {
+  const status = error instanceof MarketDataError ? error.status : 0;
+  return status === 418 || status === 429;
+}
+
+function failure(payload: unknown, fallback: string, status: number) {
+  if (status === 418 || status === 429) {
+    return new MarketDataError("The exchange is rate-limiting this browser. Retrying shortly.", status);
+  }
+  return new MarketDataError(messageOf(payload, fallback), status);
+}
+
 function messageOf(payload: unknown, fallback: string) {
   const detail = (payload as { retMsg?: unknown; msg?: unknown } | null) ?? {};
   const text = [detail.retMsg, detail.msg].find(
@@ -56,9 +78,11 @@ export async function fetchCandles(
 ): Promise<Bar[]> {
   const bybit = exchange === "bybit";
   const end = endTime && Number.isFinite(endTime) ? Math.floor(endTime) : null;
+  // Both public endpoints cap a page at 1000 candles.
+  const page = Math.max(1, Math.min(1000, Math.floor(limit)));
   const url = bybit
-    ? `${exchangeBases.bybit}/kline?category=spot&symbol=${encodeURIComponent(symbol)}&interval=${bybitIntervals[timeframe]}&limit=${limit}${end ? `&end=${end}` : ""}`
-    : `${exchangeBases.binance}/klines?symbol=${encodeURIComponent(symbol)}&interval=${timeframe}&limit=${limit}${end ? `&endTime=${end}` : ""}`;
+    ? `${exchangeBases.bybit}/kline?category=spot&symbol=${encodeURIComponent(symbol)}&interval=${bybitIntervals[timeframe]}&limit=${page}${end ? `&end=${end}` : ""}`
+    : `${exchangeBases.binance}/klines?symbol=${encodeURIComponent(symbol)}&interval=${timeframe}&limit=${page}${end ? `&endTime=${end}` : ""}`;
   const response = await fetch(url, { cache: "no-store" });
   const payload = await readJson<unknown>(response);
   const list = bybit
@@ -67,13 +91,11 @@ export async function fetchCandles(
       ? (payload as RawCandle[])
       : null;
   if (!response.ok || !Array.isArray(list) || !list.length) {
-    throw new Error(
-      messageOf(payload, `Market data is unavailable for ${symbol} on ${exchangeName[exchange]}.`),
-    );
+    throw failure(payload, `Market data is unavailable for ${symbol} on ${exchangeName[exchange]}.`, response.status);
   }
   // Bybit lists newest-first; Binance is already oldest-first.
   const ordered = bybit ? [...list].reverse() : list;
-  return ordered.flatMap((candle) => {
+  const bars = ordered.flatMap((candle) => {
     const bar = {
       time: Math.floor(Number(candle[0]) / 1000) as UTCTimestamp,
       open: Number(candle[1]),
@@ -91,6 +113,8 @@ export async function fetchCandles(
       ? [bar]
       : [];
   });
+  // `endTime` pages can overlap the first stored candle; the sort keeps the series ascending.
+  return bars.sort((left, right) => Number(left.time) - Number(right.time));
 }
 
 export async function fetchQuote(
@@ -108,13 +132,61 @@ export async function fetchQuote(
     : (payload as Record<string, string> | null);
   const price = Number(item?.lastPrice);
   if (!response.ok || !Number.isFinite(price)) {
-    throw new Error(
-      messageOf(payload, `${symbol} is not available on ${exchangeName[exchange]}.`),
+    throw failure(
+      payload,
+      `${symbol} is not available on ${exchangeName[exchange]}.`,
+      response.status,
     );
   }
   if (bybit) return { price, change: Number(item!.price24hPcnt) * 100 };
   const opening = Number(item!.openPrice);
   return { price, change: opening ? ((price - opening) / opening) * 100 : 0 };
+}
+
+export type Quote = { price: number; change: number };
+
+function quoteFrom(raw: Record<string, string> | undefined): Quote | null {
+  const price = Number(raw?.lastPrice);
+  if (!Number.isFinite(price)) return null;
+  const percent = Number(raw?.price24hPcnt);
+  if (Number.isFinite(percent)) return { price, change: percent * 100 };
+  const opening = Number(raw?.openPrice);
+  return { price, change: opening ? ((price - opening) / opening) * 100 : 0 };
+}
+
+/**
+ * Quotes for a whole watchlist in one request per exchange.
+ *
+ * The 24H change means the same thing for every pair, and batching keeps a poll from turning a
+ * twenty-pair watchlist into twenty requests against the same rate limit.
+ */
+export async function fetchQuotes(
+  symbols: readonly string[],
+  exchange: Exchange,
+): Promise<Record<string, Quote>> {
+  const pairs = [...new Set(symbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean))];
+  if (!pairs.length) return {};
+  const bybit = exchange === "bybit";
+  const url = bybit
+    ? `${exchangeBases.bybit}/tickers?category=spot`
+    : `${exchangeBases.binance}/ticker/24hr?type=MINI&symbols=${encodeURIComponent(JSON.stringify(pairs))}`;
+  const response = await fetch(url, { cache: "no-store" });
+  const payload = await readJson<unknown>(response);
+  if (!response.ok) {
+    throw failure(payload, `Quotes are unavailable on ${exchangeName[exchange]}.`, response.status);
+  }
+  const wanted = new Set(pairs);
+  const rows = bybit
+    ? (payload as { result?: { list?: Record<string, string>[] } })?.result?.list ?? []
+    : (Array.isArray(payload) ? payload : [payload]) as Record<string, string>[];
+  const quotes: Record<string, Quote> = {};
+  for (const row of rows) {
+    const symbol = String(row?.symbol ?? "").toUpperCase();
+    if (!wanted.has(symbol)) continue;
+    const quote = quoteFrom(row);
+    if (quote) quotes[symbol] = quote;
+  }
+  return quotes;
 }
 
 /**
@@ -147,8 +219,10 @@ export async function fetchOpenInterest(
       ? (payload as RawOpenInterest[])
       : null;
   if (!response.ok || !list) {
-    throw new Error(
-      messageOf(payload, `Open interest is unavailable for ${symbol} on ${exchangeName[exchange]}.`),
+    throw failure(
+      payload,
+      `Open interest is unavailable for ${symbol} on ${exchangeName[exchange]}.`,
+      response.status,
     );
   }
   const points = list.flatMap((point) => {

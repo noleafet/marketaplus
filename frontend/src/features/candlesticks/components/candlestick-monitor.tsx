@@ -6,6 +6,8 @@ type Props = {
   running: boolean;
   busy: boolean;
   note: string;
+  /** Name, direction, interval, completion time and formation price of the newest shape. */
+  detail?: string;
   onToggle: () => void;
   onCapture: () => void;
   onOpenGuide: () => void;
@@ -20,6 +22,7 @@ export default function CandlestickMonitor({
   running,
   busy,
   note,
+  detail,
   onToggle,
   onCapture,
   onOpenGuide,
@@ -59,6 +62,11 @@ export default function CandlestickMonitor({
       >
         <TfiHelpAlt aria-hidden="true" />
       </button>
+      {detail && (
+        <p className="monitor-detail" role="status" title={detail}>
+          {detail}
+        </p>
+      )}
     </div>
   );
 }

@@ -48,7 +48,9 @@ export function paintCandlestick(
   context.stroke();
   context.setLineDash([]);
 
-  const label = `${match.label} Â· ${match.success}% ${match.bias}`;
+  const label = `${match.label} · ${match.bias} · ${match.formationPrice.toLocaleString(undefined, {
+    maximumFractionDigits: match.formationPrice >= 100 ? 2 : match.formationPrice >= 1 ? 4 : 8,
+  })}`;
   context.font = `600 ${Math.round(10 * scale)}px "Geist", system-ui, sans-serif`;
   const textWidth = context.measureText(label).width;
   const pillWidth = textWidth + 12 * scale;
