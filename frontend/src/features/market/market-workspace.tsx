@@ -1064,9 +1064,10 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
           context.restore();
         }
       }
-      // Trend Bias is a higher-timeframe reading: its anchored 1H, 4H and 1D trendlines are
-      // projected onto whatever interval the chart is showing and run one day past the newest
-      // candle. Channels below the displayed interval add noise, so they stay in the readout.
+      // Trend Bias is a higher-timeframe reading: its anchored 1H, 4H and 1D trendline segments
+      // are projected onto whatever interval the chart is showing. The current leg runs one day
+      // past the newest candle; an earlier leg stops where a close broke it. Together they map
+      // the swing structure, so a timeframe can contribute up to two lines per side.
       if (trendBias.length) {
         const plotWidth = chart.timeScale().width() || bounds.width;
         const paneBottom = bounds.height * CANDLE_PANE_TOP;
@@ -1086,7 +1087,9 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
           const tone = bias.direction === "bullish"
             ? colors.green
             : bias.direction === "bearish" ? colors.red : colors.amber;
+          const currentCount = bias.lines.filter((line) => line.segment === "current").length;
           for (const line of bias.lines) {
+            const prior = line.segment === "prior";
             // The chart may not hold enough history to reach the first pivot, so the segment starts
             // at its oldest bar and the fitted slope is read at that later time.
             const startTime = firstBarTime ? Math.max(line.t1, firstBarTime) : line.t1;
@@ -1097,18 +1100,30 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
             const startY = current.candles.priceToCoordinate(startPrice);
             const endY = current.candles.priceToCoordinate(line.p2);
             if (startY === null || endY === null) continue;
-            context.globalAlpha = 0.7;
+            // Broken legs are context, so they stay muted and dotted; the live leg carries the
+            // timeframe's colour.
+            context.globalAlpha = prior ? 0.32 : 0.7;
             context.strokeStyle = tone;
-            context.lineWidth = 1.5;
-            context.setLineDash([7, 5]);
+            context.lineWidth = prior ? 1 : 1.5;
+            context.setLineDash(prior ? [3, 4] : [7, 5]);
             context.beginPath();
             context.moveTo(Number(startX), Number(startY));
             context.lineTo(Number(endX), Number(endY));
             context.stroke();
             context.setLineDash([]);
-            // One pill per timeframe, carried by the upper line (or the only line when the other
-            // side had too few pivots).
-            if (line.kind === "high" || bias.lines.length === 1) {
+            if (prior) {
+              // The segment ends exactly where a close crossed it; the cross marks that break.
+              context.globalAlpha = 0.6;
+              context.beginPath();
+              context.moveTo(Number(endX) - 3, Number(endY) - 3);
+              context.lineTo(Number(endX) + 3, Number(endY) + 3);
+              context.moveTo(Number(endX) - 3, Number(endY) + 3);
+              context.lineTo(Number(endX) + 3, Number(endY) - 3);
+              context.stroke();
+            }
+            // One pill per timeframe, carried by the live upper line (or the only live line when
+            // the other side had too few pivots). A broken leg never carries a pill.
+            if (!prior && (line.kind === "high" || currentCount === 1)) {
               const labelX = Math.min(Number(endX), plotWidth - 4);
               const progress = (labelX - Number(startX)) / (Number(endX) - Number(startX));
               labels.push({
@@ -2011,7 +2026,9 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
    */
   const trendBiasDetail = preferences.indicators.trendBias && trendBias.length
     ? trendBias.map((bias) => {
-      const line = bias.lines.find((item) => item.kind === "high") ?? bias.lines[0];
+      const current = bias.lines.filter((item) => item.segment === "current");
+      const line = current.find((item) => item.kind === "high") ?? current[0];
+      if (!line) return `${bias.timeframe.toUpperCase()} neutral (trend broken)`;
       const slope = line.slopePctPerBar;
       return `${bias.timeframe.toUpperCase()} ${bias.direction} ${slope >= 0 ? "+" : ""}${slope.toFixed(2)}%/bar (${line.pivots} pivots)`;
     }).join(" · ")

@@ -73,12 +73,14 @@ function priceAt(line: TrendBias["lines"][number], time: number) {
   return line.p1 + line.slope * (time - line.t1);
 }
 
-/** Every candle from the first anchor to the right edge has to stay on the line's own side. */
+/** Every candle the line is actually drawn across has to stay on the line's own side. */
 function expectNoCuts(bars: Bar[], bias: TrendBias) {
   for (const line of bias.lines) {
     for (const bar of bars) {
-      if (Number(bar.time) < line.t1) continue;
-      const value = priceAt(line, Number(bar.time));
+      const time = Number(bar.time);
+      // A prior segment is cut off on the candle that broke it, so that candle is not covered.
+      if (time < line.t1 || time >= line.t2) continue;
+      const value = priceAt(line, time);
       if (line.kind === "high") {
         expect(bar.high - value).toBeLessThanOrEqual(value * 0.01);
         expect(Math.max(bar.open, bar.close) - value).toBeLessThanOrEqual(value * 0.0015);
@@ -90,6 +92,9 @@ function expectNoCuts(bars: Bar[], bias: TrendBias) {
   }
 }
 
+const currentLines = (bias: TrendBias) => bias.lines.filter((line) => line.segment === "current");
+const priorLines = (bias: TrendBias) => bias.lines.filter((line) => line.segment === "prior");
+
 describe("findTrendBias", () => {
   it("reads a rising zigzag as bullish from two anchored lines", () => {
     const bars = risingBars();
@@ -97,12 +102,16 @@ describe("findTrendBias", () => {
 
     expect(bias).not.toBeNull();
     expect(bias!.direction).toBe("bullish");
-    expect(bias!.lines.map((line) => line.kind).sort()).toEqual(["high", "low"]);
-    for (const line of bias!.lines) {
+    const live = currentLines(bias!);
+    expect(live.map((line) => line.kind).sort()).toEqual(["high", "low"]);
+    for (const line of live) {
       expect(line.slope).toBeGreaterThan(0);
       expect(line.p2).toBeGreaterThan(line.p1);
       expect(line.t2).toBe(Number(bars[bars.length - 1].time) + TREND_BIAS_EXTEND_SECONDS);
       expect(line.pivots).toBeGreaterThanOrEqual(2);
+    }
+    for (const line of priorLines(bias!)) {
+      expect(line.t2).toBeLessThan(Number(bars[bars.length - 1].time));
     }
     expectNoCuts(bars, bias!);
   });
@@ -148,9 +157,55 @@ describe("findTrendBias", () => {
 
     expect(bias).not.toBeNull();
     expect(bias!.direction).toBe("neutral");
-    expect(bias!.lines).toHaveLength(2);
-    expect(Math.sign(bias!.lines[0].slope)).toBe(-Math.sign(bias!.lines[1].slope));
+    const live = currentLines(bias!);
+    expect(live).toHaveLength(2);
+    expect(Math.sign(live[0].slope)).toBe(-Math.sign(live[1].slope));
     expectNoCuts(bars, bias!);
+  });
+
+  it("splits each side at the break and stops the prior leg on the breaking candle", () => {
+    // A climb that breaks its rising floor, bottoms, and builds a new pair of rising legs. The
+    // chart should show the old floor and ceiling as broken context plus the two current legs.
+    const bars = zigzag([
+      [0, 50],
+      [20, 80],
+      [30, 70],
+      [60, 120],
+      [70, 105],
+      [80, 150],
+      [90, 100],
+      [100, 90],
+      [120, 110],
+      [130, 100],
+      [150, 130],
+      [160, 125],
+      [170, 140],
+    ]);
+    const lastTime = Number(bars[bars.length - 1].time);
+    const bias = findTrendBias(bars, "1h", lastTime + HOUR)!;
+
+    expect(bias.direction).toBe("bullish");
+    const prior = priorLines(bias);
+    const live = currentLines(bias);
+    expect(prior.map((line) => line.kind).sort()).toEqual(["high", "low"]);
+    expect(live.map((line) => line.kind).sort()).toEqual(["high", "low"]);
+
+    for (const line of prior) {
+      const breaking = bars.find((bar) => Number(bar.time) === line.t2);
+      expect(breaking).toBeDefined();
+      expect(line.p2).toBeCloseTo(priceAt(line, line.t2), 10);
+      const value = priceAt(line, line.t2);
+      const beyond = line.kind === "high" ? breaking!.close - value : value - breaking!.close;
+      expect(beyond).toBeGreaterThan(value * 0.001);
+      expect(line.t2).toBeLessThan(lastTime);
+      // A broken leg always ends before the leg that replaced it begins.
+      const replacement = live.find((item) => item.kind === line.kind)!;
+      expect(line.t2).toBeLessThanOrEqual(replacement.t1);
+    }
+    for (const line of live) {
+      expect(line.t2).toBe(lastTime + TREND_BIAS_EXTEND_SECONDS);
+    }
+    expectNoCuts(bars, bias);
   });
 
   it("does not use an anchor that price has since cut through", () => {
@@ -169,6 +224,29 @@ describe("findTrendBias", () => {
     ]);
     const bias = findTrendBias(bars, "1h", Number(bars[bars.length - 1].time) + HOUR);
     if (bias) expectNoCuts(bars, bias);
+  });
+
+  it("drops a leg that runs off the price scale instead of calling zero a break", () => {
+    // After the August crash the lows stay near 2 while an old steep floor keeps falling; its
+    // line would reach zero, which is not a break of structure and must not be drawn.
+    const bars = zigzag([
+      [0, 100],
+      [20, 80],
+      [30, 90],
+      [40, 15],
+      [50, 20],
+      [60, 18],
+      [80, 2],
+      [260, 2],
+    ]);
+    const last = bars[bars.length - 1];
+    const bias = findTrendBias(bars, "1h", Number(last.time) + HOUR)!;
+
+    expect(bias).not.toBeNull();
+    // The only low pair drops through zero after its anchors, so it is not a support line.
+    expect(bias.lines.some((line) => line.kind === "low")).toBe(false);
+    for (const line of bias.lines) expect(line.p2).toBeGreaterThan(0);
+    expectNoCuts(bars, bias);
   });
 
   it("ignores the still-forming candle", () => {
