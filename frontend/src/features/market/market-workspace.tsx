@@ -1064,19 +1064,25 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
           context.restore();
         }
       }
-      // Trend Bias is a higher-timeframe reading: the 1H, 4H and 1D regression channels are
+      // Trend Bias is a higher-timeframe reading: its anchored 1H, 4H and 1D trendlines are
       // projected onto whatever interval the chart is showing and run one day past the newest
-      // candle.
+      // candle. Channels below the displayed interval add noise, so they stay in the readout.
       if (trendBias.length) {
         const plotWidth = chart.timeScale().width() || bounds.width;
         const paneBottom = bounds.height * CANDLE_PANE_TOP;
         const firstBarTime = Number(barsRef.current[0]?.time ?? 0);
+        const chartSeconds = intervalSeconds[timeframe];
+        const atOrAbove = trendBias.filter((bias) => (
+          intervalSeconds[bias.timeframe] >= chartSeconds
+        ));
+        // A weekly chart sits above all three readings; the daily pair is the closest context.
+        const shownBias = atOrAbove.length ? atOrAbove : trendBias.slice(-1);
         const labels: { x: number; y: number; text: string; tone: string; up: boolean }[] = [];
         context.save();
         context.beginPath();
         context.rect(0, 0, plotWidth, paneBottom);
         context.clip();
-        for (const bias of trendBias) {
+        for (const bias of shownBias) {
           const tone = bias.direction === "bullish"
             ? colors.green
             : bias.direction === "bearish" ? colors.red : colors.amber;
