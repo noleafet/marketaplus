@@ -29,7 +29,7 @@ const METRIC_TITLES = {
   rsi: "RSI-14 on the last closed candle",
   ema: "EMA-100 on the last closed candle",
   macd: "MACD crossover difference: the MACD line minus its signal line on the last closed candle. Positive is a bullish cross, negative a bearish one",
-  oi: "Open interest at the last closed candle, with its change from the closed candle before it",
+  oi: "Open interest change at the last closed candle from the closed candle before it",
 } as const;
 
 /**
@@ -104,6 +104,30 @@ export default function WatchlistPanel({
             {changeLabel(change)}
           </small>
         )}
+      </span>
+    );
+  };
+
+  /**
+   * The OI cell shows only the percentage change, because the raw contract count is too wide
+   * for the column. The absolute reading stays in the tooltip.
+   */
+  const oiReading = (reading: WatchReading | undefined) => {
+    if (reading === undefined) {
+      return <span className="watch-metric" title={METRIC_TITLES.oi}>…</span>;
+    }
+    const title =
+      reading.value === null
+        ? METRIC_TITLES.oi
+        : `${METRIC_TITLES.oi}. ${compact(reading.value, 2)} at that candle`;
+    if (reading.change === null) {
+      return <span className="watch-metric" title={title}>–</span>;
+    }
+    return (
+      <span className="watch-metric" title={title}>
+        <span className={reading.change >= 0 ? "positive" : "negative"}>
+          {changeLabel(reading.change)}
+        </span>
       </span>
     );
   };
@@ -189,9 +213,7 @@ export default function WatchlistPanel({
                         (value) => (value >= 0 ? "positive" : "negative"),
                       )
                     : ""}
-                  {on
-                    ? reading(metric?.oi, METRIC_TITLES.oi, (value) => compact(value, 2))
-                    : ""}
+                  {on ? oiReading(metric?.oi) : ""}
                   <button
                     className="remove-watch"
                     disabled={!loaded}
