@@ -1088,8 +1088,8 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
             ? colors.green
             : bias.direction === "bearish" ? colors.red : colors.amber;
           const currentCount = bias.lines.filter((line) => line.segment === "current").length;
-          // Broken legs are context, so they are painted first and stay dotted; the live legs sit
-          // on top as solid, glowing lines and carry the timeframe's colour.
+          // Broken legs are context, so they are painted first and stay faint; the live legs sit
+          // on top with a clearer dash and carry the timeframe's colour.
           const ordered = [...bias.lines].sort(
             (left, right) => Number(left.segment === "current") - Number(right.segment === "current"),
           );
@@ -1110,18 +1110,12 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
             const inPane = Math.max(Number(startY), Number(endY)) >= 0
               && Math.min(Number(startY), Number(endY)) <= paneBottom;
             if (inPane) {
-              // A soft glow lifts the line off a busy candle field, then a crisp core carries it.
+              // Plain dashed segments: the bias is context, so it sits behind the candles rather
+              // than competing with them.
               context.strokeStyle = tone;
-              context.setLineDash([]);
-              context.globalAlpha = prior ? 0.1 : 0.2;
-              context.lineWidth = prior ? 4 : 8;
-              context.beginPath();
-              context.moveTo(Number(startX), Number(startY));
-              context.lineTo(Number(endX), Number(endY));
-              context.stroke();
-              context.globalAlpha = prior ? 0.55 : 0.95;
-              context.lineWidth = prior ? 1.5 : 2.25;
-              context.setLineDash(prior ? [2, 4] : []);
+              context.globalAlpha = prior ? 0.28 : 0.5;
+              context.lineWidth = prior ? 1 : 1.5;
+              context.setLineDash(prior ? [2, 4] : [5, 5]);
               context.beginPath();
               context.moveTo(Number(startX), Number(startY));
               context.lineTo(Number(endX), Number(endY));
@@ -1129,31 +1123,14 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
               context.setLineDash([]);
               if (prior) {
                 // The segment ends exactly where a close crossed it; the cross marks that break.
-                context.globalAlpha = 0.7;
-                context.lineWidth = 1.5;
+                context.globalAlpha = 0.45;
+                context.lineWidth = 1;
                 context.beginPath();
                 context.moveTo(Number(endX) - 3, Number(endY) - 3);
                 context.lineTo(Number(endX) + 3, Number(endY) + 3);
                 context.moveTo(Number(endX) - 3, Number(endY) + 3);
                 context.lineTo(Number(endX) + 3, Number(endY) - 3);
                 context.stroke();
-              } else {
-                // The dot marks where the 24-hour projection reaches. A projection that runs past
-                // the right edge is pinned to it, so the line still shows it continues.
-                let dotX = Number(endX);
-                let dotY = Number(endY);
-                if (dotX > plotWidth - 3) {
-                  dotX = plotWidth - 3;
-                  const ratio = (dotX - Number(startX)) / (Number(endX) - Number(startX));
-                  dotY = Number(startY) + (Number(endY) - Number(startY)) * ratio;
-                }
-                if (dotY >= 0 && dotY <= paneBottom) {
-                  context.globalAlpha = 0.95;
-                  context.fillStyle = tone;
-                  context.beginPath();
-                  context.arc(dotX, dotY, 3, 0, Math.PI * 2);
-                  context.fill();
-                }
               }
             }
             // One pill per timeframe, carried by the live upper line (or the only live line when
