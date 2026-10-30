@@ -11,8 +11,8 @@ export type TrendBiasDirection = "bullish" | "bearish" | "neutral";
 /**
  * One trendline segment through two swing highs or two swing lows.
  *
- * A "current" segment is still respected by the newest closed candle and runs one day into the
- * future. A "prior" segment is an earlier leg that a close has since broken; it stops on the
+ * A "current" segment is still respected by the newest closed candle and runs 24 hours past the
+ * current time. A "prior" segment is an earlier leg that a close has since broken; it stops on the
  * breaking candle so it never draws through the move that invalidated it.
  */
 export type TrendBiasLine = {
@@ -21,7 +21,7 @@ export type TrendBiasLine = {
   /** First anchor, in unix seconds. */
   t1: number;
   p1: number;
-  /** End point, in unix seconds: one day past the newest candle, or the breaking candle. */
+  /** End point, in unix seconds: 24 hours past the current time, or the breaking candle. */
   t2: number;
   p2: number;
   /** Price change per second, used to read a price at any time along the line. */
@@ -75,7 +75,7 @@ const MAX_WICK_PIERCING = 0.01;
 const TOUCH_TOLERANCE = 0.005;
 /** Slopes below this are read as flat rather than bullish or bearish. */
 const FLAT_SLOPE_PCT = 0.01;
-/** The current segment runs one full day past the newest candle. */
+/** The current segment runs 24 hours past the current time, so every timeframe reaches the future. */
 export const TREND_BIAS_EXTEND_SECONDS = 86400;
 
 const priceAt = (left: Pivot, slope: number, time: number) => left.price + slope * (time - left.time);
@@ -278,7 +278,7 @@ export function findTrendBias(
   const required = SWING_SPAN * 2 + MIN_SPAN_BARS;
   if (bars.length < required) return null;
 
-  const endTime = Number(bars[bars.length - 1].time) + TREND_BIAS_EXTEND_SECONDS;
+  const endTime = nowSeconds + TREND_BIAS_EXTEND_SECONDS;
   const barSeconds = intervalSeconds[timeframe as Timeframe];
   const lines: TrendBiasLine[] = [];
   const currentLines: TrendBiasLine[] = [];

@@ -18,7 +18,7 @@ const indicatorTitles: Partial<Record<keyof Preferences["indicators"], string>> 
   keyLevel:
     "Shows up to two closest supports and two closest resistances scoring 40/100 or more. Strength: independent reactions 30, price rejection 25, higher-timeframe confluence 20, volume 15, recency 10",
   trendBias:
-    "Draws 1H, 4H and 1D trendline segments through two major swing highs and lows, keeping every candle on the correct side. The current leg extends one day past the latest candle; the previous leg stops where price broke it. Readings below the chart interval stay in the readout but are not drawn",
+    "Draws 1H, 4H and 1D trendline segments through two major swing highs and lows, keeping every candle on the correct side. The current leg extends 24 hours past the current time; the previous leg stops where price broke it. Readings below the chart interval stay in the readout but are not drawn",
 };
 
 type IndicatorProps = {

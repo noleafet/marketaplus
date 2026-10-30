@@ -98,7 +98,8 @@ const priorLines = (bias: TrendBias) => bias.lines.filter((line) => line.segment
 describe("findTrendBias", () => {
   it("reads a rising zigzag as bullish from two anchored lines", () => {
     const bars = risingBars();
-    const bias = findTrendBias(bars, "1h", Number(bars[bars.length - 1].time) + HOUR);
+    const now = Number(bars[bars.length - 1].time) + HOUR;
+    const bias = findTrendBias(bars, "1h", now);
 
     expect(bias).not.toBeNull();
     expect(bias!.direction).toBe("bullish");
@@ -107,7 +108,7 @@ describe("findTrendBias", () => {
     for (const line of live) {
       expect(line.slope).toBeGreaterThan(0);
       expect(line.p2).toBeGreaterThan(line.p1);
-      expect(line.t2).toBe(Number(bars[bars.length - 1].time) + TREND_BIAS_EXTEND_SECONDS);
+      expect(line.t2).toBe(now + TREND_BIAS_EXTEND_SECONDS);
       expect(line.pivots).toBeGreaterThanOrEqual(2);
     }
     for (const line of priorLines(bias!)) {
@@ -182,7 +183,8 @@ describe("findTrendBias", () => {
       [170, 140],
     ]);
     const lastTime = Number(bars[bars.length - 1].time);
-    const bias = findTrendBias(bars, "1h", lastTime + HOUR)!;
+    const now = lastTime + HOUR;
+    const bias = findTrendBias(bars, "1h", now)!;
 
     expect(bias.direction).toBe("bullish");
     const prior = priorLines(bias);
@@ -203,7 +205,7 @@ describe("findTrendBias", () => {
       expect(line.t2).toBeLessThanOrEqual(replacement.t1);
     }
     for (const line of live) {
-      expect(line.t2).toBe(lastTime + TREND_BIAS_EXTEND_SECONDS);
+      expect(line.t2).toBe(now + TREND_BIAS_EXTEND_SECONDS);
     }
     expectNoCuts(bars, bias);
   });

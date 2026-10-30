@@ -1065,9 +1065,9 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
         }
       }
       // Trend Bias is a higher-timeframe reading: its anchored 1H, 4H and 1D trendline segments
-      // are projected onto whatever interval the chart is showing. The current leg runs one day
-      // past the newest candle; an earlier leg stops where a close broke it. Together they map
-      // the swing structure, so a timeframe can contribute up to two lines per side.
+      // are projected onto whatever interval the chart is showing. The current leg reaches 24
+      // hours past the current time; an earlier leg stops where a close broke it. Together they
+      // map the swing structure, so a timeframe can contribute up to two lines per side.
       if (trendBias.length) {
         const plotWidth = chart.timeScale().width() || bounds.width;
         const paneBottom = bounds.height * CANDLE_PANE_TOP;
