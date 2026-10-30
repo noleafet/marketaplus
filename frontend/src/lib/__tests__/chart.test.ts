@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { Drawing } from "@/types/market";
-import { distanceToSegment, hitTestDrawings, lineValue } from "../chart";
+import type { IChartApi } from "lightweight-charts";
+import type { Bar, Drawing } from "@/types/market";
+import { distanceToSegment, drawingCoordinate, hitTestDrawings, lineValue } from "../chart";
 
 describe("distanceToSegment", () => {
   it("measures perpendicular distance to the middle of a segment", () => {
@@ -28,6 +29,53 @@ describe("hitTestDrawings", () => {
   it("returns null when every line is out of reach", () => {
     expect(hitTestDrawings(lines, 50, 20, 8)).toBeNull();
     expect(hitTestDrawings([], 50, 20, 8)).toBeNull();
+  });
+});
+
+describe("drawingCoordinate", () => {
+  const bars: Bar[] = [0, 86400, 172800, 259200].map((time) => ({
+    time: time as Bar["time"],
+    open: 1,
+    high: 1,
+    low: 1,
+    close: 1,
+    volume: 1,
+  }));
+
+  /**
+   * Mirrors the library: only times present in the series resolve directly, whole bar indexes
+   * map to a coordinate, and fractional indexes collapse to 0.
+   */
+  const chartWith = (present: number[] = []) => ({
+    timeScale: () => ({
+      timeToCoordinate: (time: number) => (present.includes(time) ? 500 : null),
+      logicalToCoordinate: (logical: number) => (Number.isInteger(logical) ? 100 + logical * 8 : 0),
+    }),
+  } as unknown as IChartApi);
+
+  it("uses the library coordinate for a time that is a bar", () => {
+    expect(drawingCoordinate(chartWith([172800]), 172800, bars, "1d")).toBe(500);
+  });
+
+  it("returns null before the first bar", () => {
+    expect(drawingCoordinate(chartWith(), -1, bars, "1d")).toBeNull();
+  });
+
+  it("interpolates a 24-hour projection past the newest bar", () => {
+    // 12 hours past the last daily bar: half a bar into the projected margin.
+    expect(drawingCoordinate(chartWith(), 259200 + 43200, bars, "1d")).toBeCloseTo(128, 10);
+  });
+
+  it("interpolates an intraday pivot on a daily chart", () => {
+    // 08:00 on the second day sits a third of the way to the next daily bar.
+    expect(drawingCoordinate(chartWith(), 86400 + 8 * 3600, bars, "1d")).toBeCloseTo(110.6667, 3);
+  });
+
+  it("returns null while the chart has no time scale", () => {
+    const empty = {
+      timeScale: () => ({ timeToCoordinate: () => null, logicalToCoordinate: () => null }),
+    } as unknown as IChartApi;
+    expect(drawingCoordinate(empty, 86400, bars, "1d")).toBeNull();
   });
 });
 

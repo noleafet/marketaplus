@@ -37,7 +37,15 @@ export function drawingCoordinate(
   }
   const logical =
     low + (time - Number(data[low].time)) / intervalSeconds[timeframe];
-  return scale.logicalToCoordinate(logical as Logical);
+  // The library maps whole bar indexes only: a fractional logical - a 4H pivot on a 1D chart, or
+  // any time past the newest bar - is rejected and collapses to x = 0. Interpolate between the
+  // two whole indexes instead, which keeps cross-timeframe drawings and projections on the chart.
+  const base = Math.floor(logical);
+  const before = scale.logicalToCoordinate(base as Logical);
+  if (before === null) return null;
+  const after = scale.logicalToCoordinate((base + 1) as Logical);
+  if (after === null) return before;
+  return before + (logical - base) * (after - before);
 }
 
 /**

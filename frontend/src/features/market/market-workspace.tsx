@@ -1088,7 +1088,12 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
             ? colors.green
             : bias.direction === "bearish" ? colors.red : colors.amber;
           const currentCount = bias.lines.filter((line) => line.segment === "current").length;
-          for (const line of bias.lines) {
+          // Broken legs are context, so they are painted first and stay dotted; the live legs sit
+          // on top as solid, glowing lines and carry the timeframe's colour.
+          const ordered = [...bias.lines].sort(
+            (left, right) => Number(left.segment === "current") - Number(right.segment === "current"),
+          );
+          for (const line of ordered) {
             const prior = line.segment === "prior";
             // The chart may not hold enough history to reach the first pivot, so the segment starts
             // at its oldest bar and the fitted slope is read at that later time.
@@ -1100,36 +1105,67 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
             const startY = current.candles.priceToCoordinate(startPrice);
             const endY = current.candles.priceToCoordinate(line.p2);
             if (startY === null || endY === null) continue;
-            // Broken legs are context, so they stay muted and dotted; the live leg carries the
-            // timeframe's colour.
-            context.globalAlpha = prior ? 0.32 : 0.7;
-            context.strokeStyle = tone;
-            context.lineWidth = prior ? 1 : 1.5;
-            context.setLineDash(prior ? [3, 4] : [7, 5]);
-            context.beginPath();
-            context.moveTo(Number(startX), Number(startY));
-            context.lineTo(Number(endX), Number(endY));
-            context.stroke();
-            context.setLineDash([]);
-            if (prior) {
-              // The segment ends exactly where a close crossed it; the cross marks that break.
-              context.globalAlpha = 0.6;
+            const offAbove = Number(endY) < 0;
+            const offBelow = Number(endY) > paneBottom;
+            const inPane = Math.max(Number(startY), Number(endY)) >= 0
+              && Math.min(Number(startY), Number(endY)) <= paneBottom;
+            if (inPane) {
+              // A soft glow lifts the line off a busy candle field, then a crisp core carries it.
+              context.strokeStyle = tone;
+              context.setLineDash([]);
+              context.globalAlpha = prior ? 0.1 : 0.2;
+              context.lineWidth = prior ? 4 : 8;
               context.beginPath();
-              context.moveTo(Number(endX) - 3, Number(endY) - 3);
-              context.lineTo(Number(endX) + 3, Number(endY) + 3);
-              context.moveTo(Number(endX) - 3, Number(endY) + 3);
-              context.lineTo(Number(endX) + 3, Number(endY) - 3);
+              context.moveTo(Number(startX), Number(startY));
+              context.lineTo(Number(endX), Number(endY));
               context.stroke();
+              context.globalAlpha = prior ? 0.55 : 0.95;
+              context.lineWidth = prior ? 1.5 : 2.25;
+              context.setLineDash(prior ? [2, 4] : []);
+              context.beginPath();
+              context.moveTo(Number(startX), Number(startY));
+              context.lineTo(Number(endX), Number(endY));
+              context.stroke();
+              context.setLineDash([]);
+              if (prior) {
+                // The segment ends exactly where a close crossed it; the cross marks that break.
+                context.globalAlpha = 0.7;
+                context.lineWidth = 1.5;
+                context.beginPath();
+                context.moveTo(Number(endX) - 3, Number(endY) - 3);
+                context.lineTo(Number(endX) + 3, Number(endY) + 3);
+                context.moveTo(Number(endX) - 3, Number(endY) + 3);
+                context.lineTo(Number(endX) + 3, Number(endY) - 3);
+                context.stroke();
+              } else {
+                // The dot marks where the 24-hour projection reaches. A projection that runs past
+                // the right edge is pinned to it, so the line still shows it continues.
+                let dotX = Number(endX);
+                let dotY = Number(endY);
+                if (dotX > plotWidth - 3) {
+                  dotX = plotWidth - 3;
+                  const ratio = (dotX - Number(startX)) / (Number(endX) - Number(startX));
+                  dotY = Number(startY) + (Number(endY) - Number(startY)) * ratio;
+                }
+                if (dotY >= 0 && dotY <= paneBottom) {
+                  context.globalAlpha = 0.95;
+                  context.fillStyle = tone;
+                  context.beginPath();
+                  context.arc(dotX, dotY, 3, 0, Math.PI * 2);
+                  context.fill();
+                }
+              }
             }
             // One pill per timeframe, carried by the live upper line (or the only live line when
-            // the other side had too few pivots). A broken leg never carries a pill.
+            // the other side had too few pivots). A broken leg never carries a pill. An arrow
+            // marks a live line whose endpoint sits above or below the visible price scale.
             if (!prior && (line.kind === "high" || currentCount === 1)) {
               const labelX = Math.min(Number(endX), plotWidth - 4);
               const progress = (labelX - Number(startX)) / (Number(endX) - Number(startX));
               labels.push({
                 x: labelX,
                 y: Number(startY) + (Number(endY) - Number(startY)) * progress,
-                text: `${bias.timeframe.toUpperCase()} ${bias.direction}`,
+                text: `${bias.timeframe.toUpperCase()} ${bias.direction}${offAbove ? " ↑" : offBelow ? " ↓" : ""}`,
                 tone,
                 up: line.kind === "high",
               });
@@ -1137,11 +1173,11 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
           }
         }
         context.globalAlpha = 1;
-        context.font = '600 9px "Geist", system-ui, sans-serif';
-        const pillHeight = 16;
+        context.font = '600 10px "Geist", system-ui, sans-serif';
+        const pillHeight = 18;
         const usedPills: number[] = [];
         for (const label of labels) {
-          const pillWidth = context.measureText(label.text).width + 12;
+          const pillWidth = context.measureText(label.text).width + 14;
           const x = Math.max(4, Math.min(plotWidth - pillWidth - 4, label.x - pillWidth - 8));
           const direction = label.up ? -1 : 1;
           let y = label.up ? label.y - pillHeight - 5 : label.y + 5;
@@ -1153,13 +1189,12 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
           }
           y = Math.max(2, Math.min(paneBottom - pillHeight - 2, y));
           usedPills.push(y);
-          context.globalAlpha = 0.92;
+          context.globalAlpha = 1;
           context.fillStyle = label.tone;
           context.fillRect(x, y, pillWidth, pillHeight);
-          context.globalAlpha = 1;
           context.fillStyle = colors.bg;
           context.textBaseline = "middle";
-          context.fillText(label.text, x + 6, y + pillHeight / 2);
+          context.fillText(label.text, x + 7, y + pillHeight / 2);
         }
         context.restore();
       }
