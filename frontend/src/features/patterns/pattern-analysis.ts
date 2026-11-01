@@ -41,8 +41,9 @@ const choices = new Map(patternChoices.map((choice) => [choice.value, choice]));
 
 export type PatternPoint = { time: number; price: number };
 /** The role decides how the workspace paints a line; the geometry carries no styling itself.
- *  "projection" is a swing that has not printed yet and "trigger" is the level that confirms it. */
-export type PatternSegment = { from: PatternPoint; to: PatternPoint; role: "outline" | "boundary" | "pole" | "target" | "projection" | "trigger" };
+ *  "projection" is a swing that has not printed yet, "trigger" is the level that confirms it and
+ *  "entry" is the flat level the confirmed shape is traded at. */
+export type PatternSegment = { from: PatternPoint; to: PatternPoint; role: "outline" | "boundary" | "pole" | "target" | "projection" | "trigger" | "entry" };
 export type PatternMarker = PatternPoint & { kind: "peak" | "trough"; text?: string };
 export type PatternLabel = PatternPoint & { text: string };
 export type PatternMatch = {
@@ -114,20 +115,6 @@ function firstCloseBeyond(
     if (direction === "above" ? close > levelAt(index) : close < levelAt(index)) return index;
   }
   return null;
-}
-
-/**
- * True when a bar after `from` has closed beyond the level. Confirmation only counts after the
- * last swing of the shape: a neckline break that happened before the right shoulder does not
- * complete the pattern, it just means the shape failed on the way there.
- */
-function closedBeyond(
-  bars: PatternBar[],
-  from: number,
-  direction: "above" | "below",
-  levelAt: (index: number) => number,
-) {
-  return firstCloseBeyond(bars, from, direction, levelAt) !== null;
 }
 
 function priceText(value: number) {
@@ -226,6 +213,28 @@ function timeAt(bars: PatternBar[], index: number) {
   if (index < 0) return bars[0].time + index * step;
   if (index >= bars.length) return bars[bars.length - 1].time + (index - bars.length + 1) * step;
   return bars[index].time;
+}
+
+/** A level the shape can be entered at, with the pill that spells its price out. */
+type EntryLevel = { segment: PatternSegment; label: PatternLabel };
+
+/**
+ * The entry is a flat price, so it is drawn from the bar that names the level out to the shape's
+ * projection edge. A level anchored on the newest bar has no edge past it, so it keeps a short run
+ * of its own rather than collapsing into a dot nobody can read.
+ */
+function entryAt(
+  bars: PatternBar[],
+  fromIndex: number,
+  price: number,
+  edgeIndex: number,
+  side?: "up" | "down",
+): EntryLevel {
+  const to = Math.max(edgeIndex, fromIndex + 4);
+  return {
+    segment: { from: { time: timeAt(bars, fromIndex), price }, to: { time: timeAt(bars, to), price }, role: "entry" },
+    label: { time: timeAt(bars, to), price, text: `Entry${side ? ` ${side}` : ""} ${priceText(price)}` },
+  };
 }
 
 function poleExtents(bars: PatternBar[], from: number, to: number) {
@@ -383,12 +392,21 @@ function buildThreeSwing(key: PatternKey, bars: PatternBar[], found: ThreeSwing)
       const neckNow = neckline.at(bars.length - 1);
       trigger = `Close ${breakWord} ${priceText(neckNow)} to confirm.`;
       entry = trigger;
+      const level = entryAt(bars, bars.length - 1, neckNow, edge);
+      segments.push(level.segment);
+      labels.push(level.label);
       summary = `${summary} · break ${breakWord} ${priceText(neckNow)} · target ${priceText(target)}`;
     } else {
       summary = `${choice.label} over ${span} bars · neckline ${priceText(neckEnd)} · target ${priceText(target)}`;
-      entry = breakIndex !== null && neckline
-        ? `Neckline broke ${breakWord} ${priceText(neckline.at(breakIndex))}.`
+      const breakPrice = breakIndex !== null ? neckline.at(breakIndex) : null;
+      entry = breakIndex !== null && breakPrice !== null
+        ? `Neckline broke ${breakWord} ${priceText(breakPrice)}.`
         : undefined;
+      if (breakIndex !== null && breakPrice !== null) {
+        const level = entryAt(bars, breakIndex, breakPrice, edge);
+        segments.push(level.segment);
+        labels.push(level.label);
+      }
     }
   }
   const markers: PatternMarker[] = [
@@ -463,9 +481,10 @@ function buildDoubleSwing(key: PatternKey, bars: PatternBar[], found: DoubleSwin
   const missingSecond = second === null;
   // Two equal tops are not a confirmed double top until price closes through the reaction low.
   // The same rule mirrored applies to a double bottom and its reaction high.
-  const confirmed = second !== null
-    && closedBeyond(bars, second.index, bearish ? "below" : "above", () => middle.price);
-  const forming = missingSecond || !confirmed;
+  const breakIndex = second !== null
+    ? firstCloseBeyond(bars, second.index, bearish ? "below" : "above", () => middle.price)
+    : null;
+  const forming = missingSecond || breakIndex === null;
   const choice = choices.get(key)!;
   // With no second top yet, the level it has to come back to is the flat one it left behind.
   const level = second
@@ -519,6 +538,11 @@ function buildDoubleSwing(key: PatternKey, bars: PatternBar[], found: DoubleSwin
       summary += ` · neckline ${priceText(neckline.at(edge))}`;
       entry = `Reaction level broke at ${priceText(neckline.at(edge))}.`;
     }
+    // The reaction line is flat, so the entry is that same level: run from the bar that broke it,
+    // or from the newest bar while the break is still ahead.
+    const entryLevel = entryAt(bars, breakIndex ?? bars.length - 1, neckline.at(edge), edge);
+    segments.push(entryLevel.segment);
+    labels.push(entryLevel.label);
     summary += ` · target ${priceText(target)}`;
   }
   const markers: PatternMarker[] = [
@@ -607,6 +631,9 @@ function findFlag(bars: PatternBar[], key: "bull_flag" | "bear_flag") {
       const invalidation = rising
         ? `Close below ${priceText(pole.low)} (pole low) invalidates the flag.`
         : `Close above ${priceText(pole.high)} (pole high) invalidates the flag.`;
+      const entryLevel = entryAt(bars, last, triggerLevel, last + PROJECTION_BARS);
+      segments.push(entryLevel.segment);
+      labels.push(entryLevel.label);
       best = {
         score,
         result: {
@@ -720,6 +747,17 @@ function findConvergence(bars: PatternBar[], swings: Pivot[], kind: "ascending" 
     const entry = forming
       ? trigger
       : `Break ${resolution === "up" ? "above" : "below"} ${priceText(resolution === "up" ? upper.at(breakIndex ?? last) : lower.at(breakIndex ?? last))} confirmed.`;
+    // A symmetrical shape that has not picked a side is entered on either edge, the same way both
+    // measured moves are projected above. The other four trade the one side the trigger names.
+    const edgeIndex = last + PROJECTION_BARS;
+    const breakSide = resolution ? (resolution === "up" ? upper.at(breakIndex ?? last) : lower.at(breakIndex ?? last)) : level;
+    const entryLevels = kind === "symmetrical" && forming
+      ? [entryAt(bars, last, upper.at(last), edgeIndex, "up"), entryAt(bars, last, lower.at(last), edgeIndex, "down")]
+      : [entryAt(bars, resolution ? breakIndex ?? last : last, breakSide, edgeIndex)];
+    for (const item of entryLevels) {
+      segments.push(item.segment);
+      labels.push(item.label);
+    }
     // The pattern's thesis fails when price closes back through the side it broke from. A
     // symmetrical triangle with no resolution yet has no side, so neither edge invalidates it;
     // only a close back inside the channel after a breakout undoes that breakout.

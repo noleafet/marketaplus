@@ -47,6 +47,8 @@ export function paintPattern(
   const accent = match.bias === "bullish" ? colors.green : colors.red;
   // "projection" is a swing that has not printed yet and "trigger" is the level that confirms it,
   // so both are drawn fainter than real geometry to keep the finished shape legible.
+  // The entry shares the accent with the measured target but stays solid, so the two never read
+  // as the same line.
   const paint = {
     outline: colors.blue,
     boundary: colors.amber,
@@ -54,6 +56,7 @@ export function paintPattern(
     pole: colors.text,
     target: accent,
     projection: colors.blue,
+    entry: accent,
   };
   const dash = {
     outline: [5 * scale, 4 * scale],
@@ -62,6 +65,7 @@ export function paintPattern(
     pole: [],
     target: [7 * scale, 5 * scale],
     projection: [2 * scale, 4 * scale],
+    entry: [],
   };
   const alpha = {
     outline: 0.85,
@@ -70,6 +74,7 @@ export function paintPattern(
     pole: 1,
     target: 1,
     projection: 0.6,
+    entry: 1,
   };
   const width = {
     outline: 1.5,
@@ -78,6 +83,7 @@ export function paintPattern(
     pole: 2.4,
     target: 1.5,
     projection: 1.3,
+    entry: 2,
   };
   context.save();
   context.beginPath();

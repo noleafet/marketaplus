@@ -240,3 +240,116 @@ describe("triangles and wedges", () => {
     expect(match.summary).toContain("target");
   });
 });
+
+describe("entry level", () => {
+  function entrySegments(match: PatternMatch): PatternSegment[] {
+    const found = match.segments.filter((segment) => segment.role === "entry");
+    expect(found.length).toBeGreaterThan(0);
+    return found;
+  }
+
+  /** The pill is what makes the level readable, so it has to carry the entry's own price. */
+  function entryLabels(match: PatternMatch): string[] {
+    return match.labels.filter((label) => label.text.startsWith("Entry ")).map((label) => label.text);
+  }
+
+  /** A level, not a slope: the line has to stay at one price and run to the right. */
+  function expectLevel(segment: PatternSegment) {
+    expect(segment.to.price).toBe(segment.from.price);
+    expect(segment.to.time).toBeGreaterThan(segment.from.time);
+  }
+
+  it("enters a confirmed head and shoulders at the neckline break", () => {
+    const bars = anchorsAt(
+      [[0, 98], [8, 105], [14, 100], [20, 112], [26, 100], [32, 105], [45, 96], [49, 96]],
+      50,
+    );
+    const match = only("head_and_shoulders", bars);
+    const [entry] = entrySegments(match);
+
+    expectLevel(entry);
+    expect(entry.from.price).toBeCloseTo(triggerPrice(match.entry), 10);
+    expect(entryLabels(match)).toEqual([expect.stringContaining("99.75")]);
+  });
+
+  it("enters a forming shape at the neckline where price is now", () => {
+    const bars = anchorsAt([[0, 102], [8, 105], [14, 100], [20, 112], [30, 100], [34, 104]], 35);
+    const match = only("head_and_shoulders", bars);
+    const [entry] = entrySegments(match);
+
+    expectLevel(entry);
+    // The same level the trigger names, on the newest bar rather than a projected future one.
+    expect(entry.from.price).toBeCloseTo(triggerPrice(match.trigger), 10);
+    expect(entry.from.time).toBe(LAST_TIME(bars.length - 1));
+  });
+
+  it("enters a double bottom at the reaction level it broke", () => {
+    const bars = anchorsAt([[0, 100], [8, 90], [14, 100], [20, 90], [45, 110], [49, 110]], 50);
+    const match = only("double_bottom", bars);
+    const [entry] = entrySegments(match);
+
+    expectLevel(entry);
+    expect(entry.from.price).toBeCloseTo(triggerPrice(match.entry), 10);
+    expect(entryLabels(match)).toEqual([expect.stringContaining("100.25")]);
+  });
+
+  it("enters a bull flag at the channel edge on the newest bar", () => {
+    const bars = anchorsAt(
+      [[0, 100], [9, 110], [11, 110.25], [13, 108.65], [15, 109.35], [17, 107.75],
+        [19, 108.45], [21, 106.85], [23, 107.55], [29, 105.5]],
+      30,
+    );
+    const match = only("bull_flag", bars);
+    const [entry] = entrySegments(match);
+
+    expectLevel(entry);
+    expect(entry.from.price).toBeCloseTo(triggerPrice(match.trigger), 2);
+    expect(entry.from.time).toBe(LAST_TIME(bars.length - 1));
+  });
+
+  it("enters a forming ascending triangle at the flat resistance", () => {
+    const bars = anchorsAt(
+      [[0, 101], [5, 99], [10, 110], [15, 102], [20, 110], [25, 105], [30, 110], [35, 109], [39, 109]],
+      40,
+    );
+    const match = only("ascending_triangle", bars);
+    const [entry] = entrySegments(match);
+
+    expectLevel(entry);
+    expect(entry.from.price).toBeCloseTo(triggerPrice(match.trigger), 10);
+  });
+
+  it("offers both sides as entries for a symmetrical triangle that has not broken out", () => {
+    const bars = anchorsAt(
+      [[0, 105], [5, 100], [10, 110], [15, 101], [20, 109], [25, 102], [30, 108], [35, 105], [39, 105]],
+      40,
+    );
+    const match = only("symmetrical_triangle", bars);
+    const entries = entrySegments(match);
+
+    expect(entries).toHaveLength(2);
+    const [upper, lower] = match.segments.filter((segment) => segment.role === "boundary");
+    const now = LAST_TIME(bars.length - 1);
+    expectLevel(entries[0]);
+    expectLevel(entries[1]);
+    expect(entries.map((segment) => segment.from.price).sort((a, b) => a - b))
+      .toEqual([priceAt(lower!, now), priceAt(upper!, now)].sort((a, b) => a - b));
+    expect(entryLabels(match)).toEqual([
+      expect.stringMatching(/^Entry up /),
+      expect.stringMatching(/^Entry down /),
+    ]);
+  });
+
+  it("enters a resolved wedge once at the side that broke", () => {
+    const bars = anchorsAt(
+      [[0, 98], [5, 100], [10, 104], [15, 103], [20, 106], [25, 105.2], [30, 108], [34, 105]],
+      35,
+    );
+    const match = only("rising_wedge", bars);
+    const entries = entrySegments(match);
+
+    expect(entries).toHaveLength(1);
+    expectLevel(entries[0]);
+    expect(entries[0].from.price).toBeCloseTo(triggerPrice(match.entry), 10);
+  });
+});
