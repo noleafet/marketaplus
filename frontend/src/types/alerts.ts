@@ -1,7 +1,7 @@
 export type AlertItem = {
   id: number;
   symbol: string;
-  kind: "price" | "macd" | "ema" | "prediction";
+  kind: "price" | "macd" | "pattern";
   condition: string;
   price: string | null;
   timeframe: string;
@@ -26,17 +26,11 @@ export type AlertItem = {
   rsi_enabled?: boolean;
   trend_enabled?: boolean;
   trend_period?: number;
-  ema_period?: number;
-  macd_context_enabled?: boolean;
-  macd_context_timeframe?: string;
-  prediction_stage_a?: boolean;
-  prediction_stage_b?: boolean;
-  prediction_a_state?: "idle" | "early" | "breakout";
-  prediction_a_last_bar_time?: string | null;
-  prediction_a_direction?: string;
-  prediction_a_level?: Record<string, unknown>;
-  prediction_a_score?: number | null;
-  prediction_a_high_confluence?: boolean;
+  pattern_state?: "idle" | "forming" | "entered";
+  pattern_key?: string;
+  pattern_bias?: string;
+  pattern_target?: number | null;
+  pattern_last_bar_time?: string | null;
 };
 
 export type EventItem = {
@@ -53,5 +47,5 @@ export type ToastItem = {
   message: string;
 };
 
-export type AlertKind = "price" | "macd" | "ema" | "prediction";
+export type AlertKind = "price" | "macd" | "pattern";
 export type RsiSettings = { period: string; oversold: string; overbought: string };

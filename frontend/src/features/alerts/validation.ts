@@ -38,10 +38,3 @@ export function macdFieldErrors(input: {
   }
   return errors;
 }
-
-export function emaFieldErrors(input: {
-  rsiEnabled: boolean;
-  rsi: { period: string; oversold: string; overbought: string };
-}) {
-  return rsiSettingsErrors(input);
-}

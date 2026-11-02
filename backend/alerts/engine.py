@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .events import sync_market_events
-from .services import check_alerts, check_prediction_alerts
+from .services import check_alerts, check_pattern_alerts
 
 
 @dataclass(frozen=True)
@@ -26,8 +26,8 @@ def _run_alerts(_options, output):
     return {"triggered": len(events)}
 
 
-def _run_predictions(_options, output):
-    events = check_prediction_alerts(stdout=output)
+def _run_patterns(_options, output):
+    events = check_pattern_alerts(stdout=output)
     return {"triggered": len(events)}
 
 
@@ -46,19 +46,20 @@ JOBS = {
             key="alerts",
             title="Check active alerts",
             description=(
-                "Fetch current prices, MACD, EMA and RSI once and fire every active price, "
-                "MACD, EMA or line alert that matches. Equivalent to one scheduler poll."
+                "Fetch current prices, MACD and RSI once and fire every active price, "
+                "MACD or line alert that matches. Equivalent to one scheduler poll."
             ),
             run=_run_alerts,
         ),
         EngineJob(
-            key="predictions",
-            title="Check prediction stages",
+            key="patterns",
+            title="Check chart patterns",
             description=(
-                "Advance prediction stage A and stage B alerts by one poll, the same step the "
-                "scheduler runs every 60 seconds."
+                "Run the backend pattern engine over the newest closed candles and advance "
+                "every chart-pattern alert by one poll, the same step the scheduler runs every "
+                "60 seconds."
             ),
-            run=_run_predictions,
+            run=_run_patterns,
         ),
         EngineJob(
             key="events",

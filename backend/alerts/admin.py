@@ -193,21 +193,9 @@ class PatternShotAdmin(admin.ModelAdmin):
 
 @admin.register(Alert)
 class AlertAdmin(admin.ModelAdmin):
-    list_display = (
-        "symbol", "kind", "condition", "price", "timeframe",
-        "prediction_stages", "active", "created_at",
-    )
+    list_display = ("symbol", "kind", "condition", "price", "timeframe", "active", "created_at")
     list_filter = ("kind", "condition", "active", "frequency")
     search_fields = ("symbol", "note")
-
-    @admin.display(description="Prediction stages")
-    def prediction_stages(self, obj):
-        if obj.kind != Alert.Kind.PREDICTION:
-            return "—"
-        stages = [stage for stage, enabled in (
-            ("A", obj.prediction_stage_a), ("B", obj.prediction_stage_b),
-        ) if enabled]
-        return " + ".join(stages) or "none"
 
 
 @admin.register(TriggerEvent)

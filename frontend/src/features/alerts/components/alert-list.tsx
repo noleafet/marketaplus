@@ -1,5 +1,5 @@
 import type { AlertItem } from "@/types/alerts";
-import { conditions } from "../constants";
+import { conditions, patternLabels } from "../constants";
 
 type Props = {
   alerts: AlertItem[];
@@ -11,6 +11,16 @@ type Props = {
   onToggle: (alert: AlertItem) => void;
   onDelete: (id: number) => void;
 };
+
+/** What the backend engine has pinned for this alert so far. */
+function patternProgress(item: AlertItem) {
+  if (!item.pattern_key) return `Watching ${item.timeframe} candles for a shape`;
+  const shape = patternLabels[item.pattern_key] ?? item.pattern_key;
+  const bias = item.pattern_bias === "bullish" ? "bullish" : item.pattern_bias === "bearish" ? "bearish" : "";
+  const status = item.pattern_state === "forming" ? "forming" : "last reported";
+  const target = item.pattern_target == null ? "" : ` · target ${Number(item.pattern_target).toLocaleString()}`;
+  return `${shape}${bias ? ` · ${bias}` : ""} ${status}${target}`;
+}
 
 export default function AlertList({
   alerts,
@@ -57,47 +67,34 @@ export default function AlertList({
                   <span className="tag">
                     {item.kind === "macd"
                       ? `MACD · ${item.timeframe}${item.rsi_enabled ? ` + RSI ${item.rsi_timeframe || item.timeframe}` : ""}${item.trend_enabled ? ` + Trend ${item.trend_timeframe || "1h"}` : ""}`
-                      : item.kind === "ema"
-                        ? `EMA · ${item.timeframe} · EMA ${item.ema_period || 100}${item.macd_context_enabled ? ` + MACD ${item.macd_context_timeframe || "1h"}` : ""}`
-                        : item.kind === "prediction"
-                          ? `PREDICTION · ${item.timeframe}`
-                          : item.line_type
-                            ? "DRAWING"
-                            : "PRICE"}
+                      : item.kind === "pattern"
+                        ? `PATTERN · ${item.timeframe}`
+                        : item.line_type
+                          ? "DRAWING"
+                          : "PRICE"}
                   </span>
                 </div>
                 <p>
-                  {item.kind === "prediction"
-                    ? `Stages ${[
-                        item.prediction_stage_a && "A · 1H multi-TF breakout",
-                        item.prediction_stage_b && "B · breakout",
-                      ]
-                        .filter(Boolean)
-                        .join(" + ") || "none"} with the ${item.trend_period || 100} EMA`
-                    : item.kind === "ema"
-                      ? `EMA ${item.ema_period || 100} cross · RSI ${item.rsi_timeframe || item.timeframe}${item.macd_context_enabled ? ` · MACD ${item.macd_context_timeframe || "1h"}` : ""}`
-                      : item.kind === "macd"
-                        ? `MACD ${conditions[item.condition]} signal${
-                            item.macd_threshold_5 || item.macd_threshold_10
-                              ? ` (thresholds: ${[
-                                  item.macd_threshold_5 && "5%",
-                                  item.macd_threshold_10 && "10%",
-                                ]
-                                  .filter(Boolean)
-                                  .join(", ")})`
-                              : ""
-                          } · RSI ${item.rsi_timeframe || item.timeframe} · EMA ${item.trend_period || 100}/${item.trend_timeframe || "1h"}`
-                        : item.line_type
-                          ? `${conditions[item.condition]} drawing level`
-                          : `${conditions[item.condition]} ${Number(item.price).toLocaleString()}`}
+                  {item.kind === "macd"
+                    ? `MACD ${conditions[item.condition]} signal${
+                        item.macd_threshold_5 || item.macd_threshold_10
+                          ? ` (thresholds: ${[
+                              item.macd_threshold_5 && "5%",
+                              item.macd_threshold_10 && "10%",
+                            ]
+                              .filter(Boolean)
+                              .join(", ")})`
+                          : ""
+                      } · RSI ${item.rsi_timeframe || item.timeframe} · EMA ${item.trend_period || 100}/${item.trend_timeframe || "1h"}`
+                    : item.kind === "pattern"
+                      ? patternProgress(item)
+                      : item.line_type
+                        ? `${conditions[item.condition]} drawing level`
+                        : `${conditions[item.condition]} ${Number(item.price).toLocaleString()}`}
                   {item.note ? <span className="note"> · {item.note}</span> : null}
                 </p>
                 <small>
-                  {item.kind === "prediction"
-                    ? "BACKEND · 60 SECOND CHECKS"
-                    : item.frequency === "once"
-                      ? "ONE SHOT"
-                      : "REPEATING"}{" "}
+                  {item.frequency === "once" ? "ONE SHOT" : "REPEATING"}{" "}
                   · CREATED {new Date(item.created_at).toLocaleString()}
                 </small>
               </div>

@@ -100,7 +100,7 @@ export type TradeEntryDrawing = {
 export type LineAlert = {
   id: number;
   symbol: string;
-  kind: "price" | "macd" | "ema" | "prediction";
+  kind: "price" | "macd" | "pattern";
   price: string | null;
   line_type?: string;
   line_t1?: string | null;

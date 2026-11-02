@@ -10,10 +10,10 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from alerts.events import sync_market_events
 from alerts.models import AppConfiguration
-from alerts.services import check_alerts, check_prediction_alerts
+from alerts.services import check_alerts, check_pattern_alerts
 
 logger = logging.getLogger(__name__)
-PREDICTION_POLL_SECONDS = 60
+PATTERN_POLL_SECONDS = 60
 # Every four hours starting at 02:00 UTC: 02, 06, 10, 14, 18 and 22.
 MARKET_EVENT_SYNC_HOURS = "2,6,10,14,18,22"
 
@@ -59,16 +59,16 @@ class Command(BaseCommand):
                     interval_state["seconds"] = current_interval
                     logger.info("Alert polling interval updated to %s seconds", current_interval)
 
-        def poll_predictions():
+        def poll_patterns():
             try:
                 self.stdout.write(
-                    f"Checking prediction alerts (poll interval: {PREDICTION_POLL_SECONDS}s)."
+                    f"Checking chart-pattern alerts (poll interval: {PATTERN_POLL_SECONDS}s)."
                 )
-                check_prediction_alerts(stdout=self.stdout)
+                check_pattern_alerts(stdout=self.stdout)
             except Exception:
-                logger.exception("Scheduled prediction check failed")
+                logger.exception("Scheduled chart-pattern check failed")
                 self.stderr.write(self.style.ERROR(
-                    "Prediction check failed; it will be retried on the next scheduled run."
+                    "Chart-pattern check failed; it will be retried on the next scheduled run."
                 ))
 
         def sync_events():
@@ -97,11 +97,11 @@ class Command(BaseCommand):
             coalesce=True,
         )
         scheduler.add_job(
-            poll_predictions,
+            poll_patterns,
             trigger=IntervalTrigger(
-                seconds=PREDICTION_POLL_SECONDS, timezone=timezone.get_current_timezone(),
+                seconds=PATTERN_POLL_SECONDS, timezone=timezone.get_current_timezone(),
             ),
-            id="check-prediction-alerts",
+            id="check-pattern-alerts",
             next_run_time=timezone.now(),
             max_instances=1,
             coalesce=True,
@@ -117,7 +117,7 @@ class Command(BaseCommand):
         )
         self.stdout.write(self.style.SUCCESS(
             f"Alert scheduler started; checking immediately, then every {interval}s. "
-            f"Prediction stages run every {PREDICTION_POLL_SECONDS}s. "
+            f"Chart patterns run every {PATTERN_POLL_SECONDS}s. "
             f"Market events sync every 4 hours from 02:00 UTC. Ctrl+C stops it."
         ))
         try:

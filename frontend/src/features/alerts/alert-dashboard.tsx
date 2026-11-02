@@ -11,7 +11,7 @@ import {
   contextTimeframes, defaultRsiSettings, timeframes,
   type ContextTimeframe,
 } from "./constants";
-import { emaFieldErrors, macdFieldErrors } from "./validation";
+import { macdFieldErrors } from "./validation";
 import AlertForm, { type AlertFormModel } from "./components/alert-form";
 import AlertList from "./components/alert-list";
 import ActivityLog from "./components/activity-log";
@@ -39,18 +39,7 @@ export default function AlertDashboard() {
   const [rsiSettings, setRsiSettings] = useState(defaultRsiSettings);
   const [trendEnabled, setTrendEnabled] = useState(true);
   const [trendPeriod, setTrendPeriod] = useState("100");
-  const [emaTimeframe, setEmaTimeframe] = useState<(typeof timeframes)[number]>("1h");
-  const [emaPeriod, setEmaPeriod] = useState("100");
-  const [emaRsiTimeframe, setEmaRsiTimeframe] = useState<ContextTimeframe>("1h");
-  const emaRsiTimeframeTouched = useRef(false);
-  const [emaRsiEnabled, setEmaRsiEnabled] = useState(true);
-  const [emaRsiSettings, setEmaRsiSettings] = useState(defaultRsiSettings);
-  const [emaMacdEnabled, setEmaMacdEnabled] = useState(true);
-  const [emaMacdTimeframe, setEmaMacdTimeframe] = useState<ContextTimeframe>("1h");
-  const [predictionTimeframe, setPredictionTimeframe] = useState("1h");
-  const [predictionStageA, setPredictionStageA] = useState(true);
-  const [predictionStageB, setPredictionStageB] = useState(true);
-  const [predictionTrendPeriod, setPredictionTrendPeriod] = useState("100");
+  const [patternTimeframe, setPatternTimeframe] = useState<(typeof timeframes)[number]>("1h");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [notificationAvailable, setNotificationAvailable] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -224,17 +213,6 @@ export default function AlertDashboard() {
     rsiTimeframeTouched.current = true;
     setRsiTimeframe(next);
   }
-  function changeEmaTimeframe(next: (typeof timeframes)[number]) {
-    setEmaTimeframe(next);
-    // RSI follows the EMA-cross interval until the user picks a different RSI interval.
-    if (!emaRsiTimeframeTouched.current && contextTimeframes.includes(next as ContextTimeframe)) {
-      setEmaRsiTimeframe(next as ContextTimeframe);
-    }
-  }
-  function changeEmaRsiTimeframe(next: ContextTimeframe) {
-    emaRsiTimeframeTouched.current = true;
-    setEmaRsiTimeframe(next);
-  }
 
   async function createAlert(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError(""); setFieldErrors({});
@@ -265,33 +243,8 @@ export default function AlertDashboard() {
       if (trendEnabled) payload.trend_period = Number(trendPeriod);
       const errors = macdFieldErrors({ rsiEnabled, rsi: rsiSettings, trendEnabled, trendPeriod });
       if (Object.keys(errors).length) { setFieldErrors(errors); setBusy(false); return; }
-    } else if (kind === "ema") {
-      payload.timeframe = emaTimeframe;
-      payload.condition = "cross";
-      payload.ema_period = Number(emaPeriod);
-      payload.rsi_timeframe = emaRsiTimeframe;
-      payload.rsi_enabled = emaRsiEnabled;
-      if (emaRsiEnabled) {
-        payload.rsi_period = Number(emaRsiSettings.period);
-        payload.rsi_oversold = Number(emaRsiSettings.oversold);
-        payload.rsi_overbought = Number(emaRsiSettings.overbought);
-      }
-      payload.macd_context_enabled = emaMacdEnabled;
-      payload.macd_context_timeframe = emaMacdTimeframe;
-      const errors = emaFieldErrors({ rsiEnabled: emaRsiEnabled, rsi: emaRsiSettings });
-      if (Object.keys(errors).length) { setFieldErrors(errors); setBusy(false); return; }
     } else {
-      payload.timeframe = predictionTimeframe;
-      payload.condition = "cross";
-      payload.frequency = "every";
-      payload.prediction_stage_a = predictionStageA;
-      payload.prediction_stage_b = predictionStageB;
-      payload.trend_period = Number(predictionTrendPeriod);
-      if (!predictionStageA && !predictionStageB) {
-        setFieldErrors({ prediction: "Enable stage A, stage B, or both." });
-        setBusy(false);
-        return;
-      }
+      payload.timeframe = patternTimeframe;
     }
     try {
       await api<AlertItem>("/alerts/", { method: "POST", body: JSON.stringify(payload) });
@@ -308,12 +261,7 @@ export default function AlertDashboard() {
     setRsiTimeframe("1h"); setTrendTimeframe("1h");
     setRsiEnabled(true); setRsiSettings(defaultRsiSettings);
     setTrendEnabled(true); setTrendPeriod("100");
-    setEmaTimeframe("1h"); setEmaPeriod("100");
-    emaRsiTimeframeTouched.current = false;
-    setEmaRsiTimeframe("1h"); setEmaRsiEnabled(true); setEmaRsiSettings(defaultRsiSettings);
-    setEmaMacdEnabled(true); setEmaMacdTimeframe("1h");
-    setPredictionTimeframe("1h"); setPredictionStageA(true); setPredictionStageB(true);
-    setPredictionTrendPeriod("100"); setFieldErrors({});
+    setPatternTimeframe("1h"); setFieldErrors({});
   }
 
   async function toggleAlert(item: AlertItem) {
@@ -373,30 +321,7 @@ export default function AlertDashboard() {
     parts.push(` Trend context: ${trendPeriod || "100"} EMA on ${trendTimeframe}.`);
     return parts.join("");
   })();
-  const emaSummary = (() => {
-    const parts = [
-      `Notify when a ${emaTimeframe} candle closes above or below the ${emaPeriod || "100"} EMA.`,
-      ` RSI context: ${emaRsiSettings.period || "14"} period on ${emaRsiTimeframe}, ${emaRsiSettings.oversold || "30"} oversold / ${emaRsiSettings.overbought || "70"} overbought.`,
-    ];
-    parts.push(emaMacdEnabled
-      ? ` MACD trend context: line versus signal on ${emaMacdTimeframe}.`
-      : " MACD trend context is off.");
-    return parts.join("");
-  })();
-  const predictionSummary = (() => {
-    const timeframe = predictionTimeframe;
-    const ema = predictionTrendPeriod || "100";
-    if (predictionStageA && predictionStageB) {
-      return `Notify on the 1H breakout model with 4H context and optional 15M retest. Stage A covers squeeze early warnings, breakout triggers, high confluence, and failed breakouts. Stage B keeps the separate breakout confirmation with RSI and the ${ema} EMA.`;
-    }
-    if (predictionStageA) {
-      return `Notify on the 1H breakout model: 4H major levels and ${ema} EMA trend, a completed-candle break with volume and ATR buffer, a 0–100 quality score, and failed-breakout detection.`;
-    }
-    if (predictionStageB) {
-      return `Notify when a ${timeframe} breakout confirms with volume, bands, RSI, and the ${ema} EMA.`;
-    }
-    return `Notify when a ${timeframe} setup triggers.`;
-  })();
+  const patternSummary = `Watch the last 50 ${patternTimeframe} candles of ${marketSymbol || "the selected pair"} for a chart pattern. Notify while a shape is forming with the entry, invalidation and target it pins, then again when a completed candle closes through that entry at the same target.`;
   const formModel: AlertFormModel = {
     kind,
     onKindChange: setKind,
@@ -422,33 +347,12 @@ export default function AlertDashboard() {
     onTrendTimeframeChange: setTrendTimeframe,
     trendPeriod,
     onTrendPeriodChange: setTrendPeriod,
-    predictionTimeframe,
-    onPredictionTimeframeChange: setPredictionTimeframe,
-    predictionStageA,
-    onPredictionStageAChange: setPredictionStageA,
-    predictionStageB,
-    onPredictionStageBChange: setPredictionStageB,
-    predictionTrendPeriod,
-    onPredictionTrendPeriodChange: setPredictionTrendPeriod,
-    predictionSummary,
+    patternTimeframe,
+    onPatternTimeframeChange: setPatternTimeframe,
+    patternSummary,
     fieldErrors,
     busy,
     macdSummary,
-    emaTimeframe,
-    onEmaTimeframeChange: changeEmaTimeframe,
-    emaPeriod,
-    onEmaPeriodChange: setEmaPeriod,
-    emaRsiEnabled,
-    onEmaRsiEnabledChange: setEmaRsiEnabled,
-    emaRsiTimeframe,
-    onEmaRsiTimeframeChange: changeEmaRsiTimeframe,
-    emaRsiSettings,
-    onEmaRsiSettingsChange: setEmaRsiSettings,
-    emaMacdEnabled,
-    onEmaMacdEnabledChange: setEmaMacdEnabled,
-    emaMacdTimeframe,
-    onEmaMacdTimeframeChange: setEmaMacdTimeframe,
-    emaSummary,
   };
   const notificationsGranted =
     notificationAvailable && Notification.permission === "granted";

@@ -1,5 +1,5 @@
 /**
- * The alert worker appends a machine-facing `Report: <url>` line to MACD, EMA, and prediction
+ * The alert worker appends a machine-facing `Report: <url>` line to MACD and chart-pattern
  * events. The dashboard shows the wording but the URL itself has to become a real link.
  */
 const REPORT_LINE = /^[ \t]*Report:\s*(https?:\/\/\S+)[ \t]*$/gim;

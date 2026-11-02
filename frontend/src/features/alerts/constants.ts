@@ -9,7 +9,20 @@ export const conditions: Record<string, string> = {
 };
 
 export const timeframes = intervals;
-/** Intervals offered for the MACD and EMA cross alert RSI/MACD context. */
+/** Shape names the backend pattern engine reports. */
+export const patternLabels: Record<string, string> = {
+  head_and_shoulders: "Head and Shoulders",
+  inverse_head_and_shoulders: "Inverse Head and Shoulders",
+  double_top: "Double Top",
+  double_bottom: "Double Bottom",
+  ascending_triangle: "Ascending Triangle",
+  descending_triangle: "Descending Triangle",
+  symmetrical_triangle: "Symmetrical Triangle",
+  rising_wedge: "Rising Wedge",
+  falling_wedge: "Falling Wedge",
+};
+
+/** Intervals offered for the MACD cross alert RSI and trend context. */
 export const contextTimeframes = ["5m", "15m", "1h", "4h", "1d"] as const;
 export type ContextTimeframe = (typeof contextTimeframes)[number];
 

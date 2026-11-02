@@ -29,6 +29,10 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 class AlertSerializer(serializers.ModelSerializer):
+    # Optional because a pattern alert names only a market and a candle size; the kind that
+    # needs a condition still has to receive one, which validate() checks per kind.
+    condition = serializers.ChoiceField(choices=Alert.Condition.choices, required=False)
+
     class Meta:
         model = Alert
         fields = [
@@ -38,16 +42,15 @@ class AlertSerializer(serializers.ModelSerializer):
             "line_extend", "created_at", "updated_at", "last_triggered_at", "rsi_period",
             "rsi_oversold", "rsi_overbought", "last_rsi_value", "macd_threshold_5",
             "macd_threshold_10", "rsi_enabled", "macd_triggered", "trend_enabled",
-            "trend_period", "ema_period", "macd_context_enabled", "macd_context_timeframe",
-            "prediction_stage_a", "prediction_stage_b", "prediction_a_state",
-            "prediction_a_last_bar_time", "prediction_a_direction", "prediction_a_level",
-            "prediction_a_score", "prediction_a_high_confluence",
+            "trend_period",
+            "pattern_state", "pattern_key", "pattern_bias", "pattern_target",
+            "pattern_last_bar_time",
         ]
         read_only_fields = [
             "id", "created_at", "updated_at", "last_triggered_at", "last_rsi_value",
-            "macd_triggered", "prediction_a_state", "prediction_a_last_bar_time",
-            "prediction_a_direction", "prediction_a_level", "prediction_a_score",
-            "prediction_a_high_confluence",
+            "macd_triggered",
+            "pattern_state", "pattern_key", "pattern_bias", "pattern_target",
+            "pattern_last_bar_time",
         ]
 
     def validate_symbol(self, value):
@@ -144,70 +147,21 @@ class AlertSerializer(serializers.ModelSerializer):
                 trend_period = attrs.get("trend_period", getattr(self.instance, "trend_period", 100))
                 if trend_period is not None and (trend_period < 2 or trend_period > 500):
                     raise serializers.ValidationError({"trend_period": "Trend EMA period must be between 2 and 500."})
-        elif kind == Alert.Kind.EMA:
-            if condition not in MACD_CONDITIONS:
-                raise serializers.ValidationError({"condition": "EMA cross supports cross_up, cross_down, or cross."})
+        elif kind == Alert.Kind.PATTERN:
             timeframe = attrs.get("timeframe", getattr(self.instance, "timeframe", ""))
             if timeframe not in TIMEFRAMES:
                 raise serializers.ValidationError({"timeframe": f"Choose one of {', '.join(sorted(TIMEFRAMES))}."})
-            ema_period = attrs.get("ema_period", getattr(self.instance, "ema_period", 100))
-            if ema_period not in {100, 200}:
-                raise serializers.ValidationError({"ema_period": "Choose the 100 or 200 EMA."})
-            rsi_timeframe = attrs.get(
-                "rsi_timeframe", getattr(self.instance, "rsi_timeframe", ""),
-            )
-            if rsi_timeframe and rsi_timeframe not in TIMEFRAMES:
+            if attrs.get("price", getattr(self.instance, "price", None)) is not None:
                 raise serializers.ValidationError({
-                    "rsi_timeframe": f"Choose one of {', '.join(sorted(TIMEFRAMES))}.",
+                    "price": "A pattern alert follows the shape, so it does not take a target price.",
                 })
-            macd_context_timeframe = attrs.get(
-                "macd_context_timeframe",
-                getattr(self.instance, "macd_context_timeframe", "1h"),
-            )
-            if not macd_context_timeframe:
-                macd_context_timeframe = "1h"
-                attrs["macd_context_timeframe"] = "1h"
-            if macd_context_timeframe not in TIMEFRAMES:
-                raise serializers.ValidationError({
-                    "macd_context_timeframe": f"Choose one of {', '.join(sorted(TIMEFRAMES))}.",
-                })
-            self._apply_rsi_timeframe_default(attrs, timeframe)
             if attrs.get("line_type", ""):
                 raise serializers.ValidationError({"line_type": "Line alerts are only available for price alerts."})
-            self._validate_rsi_context(attrs)
-        elif kind == Alert.Kind.PREDICTION:
-            timeframe = attrs.get("timeframe", getattr(self.instance, "timeframe", ""))
-            if timeframe not in TIMEFRAMES:
-                raise serializers.ValidationError({"timeframe": f"Choose one of {', '.join(sorted(TIMEFRAMES))}."})
-            stage_a = attrs.get(
-                "prediction_stage_a", getattr(self.instance, "prediction_stage_a", True),
-            )
-            stage_b = attrs.get(
-                "prediction_stage_b", getattr(self.instance, "prediction_stage_b", True),
-            )
-            if not stage_a and not stage_b:
-                raise serializers.ValidationError({
-                    "prediction_stage_a": "Enable stage A, stage B, or both.",
-                })
-            # Stage A is a fixed multi-timeframe model: 4H context, 1H trigger and
-            # optional 15M retest. Stage B may still use any supported timeframe.
-            if stage_a and timeframe != "1h":
-                raise serializers.ValidationError({
-                    "timeframe": "Stage A uses the 1H breakout timeframe. Choose 1h or disable Stage A.",
-                })
-            trend_period = attrs.get(
-                "trend_period", getattr(self.instance, "trend_period", 100),
-            )
-            if trend_period is not None and (trend_period < 2 or trend_period > 500):
-                raise serializers.ValidationError({
-                    "trend_period": "Trend EMA period must be between 2 and 500.",
-                })
-            if attrs.get("line_type", ""):
-                raise serializers.ValidationError({
-                    "line_type": "Line alerts are only available for price alerts.",
-                })
+            # The engine chooses the shape and its levels, so the caller never names a condition.
+            if not attrs.get("condition"):
+                attrs["condition"] = Alert.Condition.CROSS
         elif kind == Alert.Kind.RSI:
-            raise serializers.ValidationError({"kind": "RSI alerts are only available as a confirmation option for MACD or EMA alerts. Create a MACD or EMA alert and enable its RSI context."})
+            raise serializers.ValidationError({"kind": "RSI alerts are only available as a confirmation option for MACD alerts. Create a MACD alert and enable its RSI context."})
         return attrs
 
 
@@ -303,7 +257,7 @@ class EngineRunResponseSerializer(serializers.Serializer):
     output = serializers.CharField(help_text="Stdout captured from the job while it ran.")
     triggered = serializers.IntegerField(
         required=False,
-        help_text="Alert or prediction events fired. Always 0 for the events job.",
+        help_text="Alert events fired. Always 0 for the events job.",
     )
     summary = serializers.DictField(
         required=False,

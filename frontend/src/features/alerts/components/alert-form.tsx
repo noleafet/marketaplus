@@ -32,33 +32,12 @@ export type AlertFormModel = {
   onTrendTimeframeChange: (timeframe: ContextTimeframe) => void;
   trendPeriod: string;
   onTrendPeriodChange: (period: string) => void;
-  predictionTimeframe: string;
-  onPredictionTimeframeChange: (timeframe: string) => void;
-  predictionStageA: boolean;
-  onPredictionStageAChange: (enabled: boolean) => void;
-  predictionStageB: boolean;
-  onPredictionStageBChange: (enabled: boolean) => void;
-  predictionTrendPeriod: string;
-  onPredictionTrendPeriodChange: (period: string) => void;
-  predictionSummary: string;
+  patternTimeframe: (typeof timeframes)[number];
+  onPatternTimeframeChange: (timeframe: (typeof timeframes)[number]) => void;
+  patternSummary: string;
   fieldErrors: Record<string, string>;
   busy: boolean;
   macdSummary: string;
-  emaTimeframe: (typeof timeframes)[number];
-  onEmaTimeframeChange: (timeframe: (typeof timeframes)[number]) => void;
-  emaPeriod: string;
-  onEmaPeriodChange: (period: string) => void;
-  emaRsiEnabled: boolean;
-  onEmaRsiEnabledChange: (enabled: boolean) => void;
-  emaRsiTimeframe: ContextTimeframe;
-  onEmaRsiTimeframeChange: (timeframe: ContextTimeframe) => void;
-  emaRsiSettings: RsiSettings;
-  onEmaRsiSettingsChange: (settings: RsiSettings) => void;
-  emaMacdEnabled: boolean;
-  onEmaMacdEnabledChange: (enabled: boolean) => void;
-  emaMacdTimeframe: ContextTimeframe;
-  onEmaMacdTimeframeChange: (timeframe: ContextTimeframe) => void;
-  emaSummary: string;
 };
 
 type Props = {
@@ -92,33 +71,12 @@ export default function AlertForm({ model, onSubmit }: Props) {
     onTrendTimeframeChange,
     trendPeriod,
     onTrendPeriodChange,
-    predictionTimeframe,
-    onPredictionTimeframeChange,
-    predictionStageA,
-    onPredictionStageAChange,
-    predictionStageB,
-    onPredictionStageBChange,
-    predictionTrendPeriod,
-    onPredictionTrendPeriodChange,
-    predictionSummary,
+    patternTimeframe,
+    onPatternTimeframeChange,
+    patternSummary,
     fieldErrors,
     busy,
     macdSummary,
-    emaTimeframe,
-    onEmaTimeframeChange,
-    emaPeriod,
-    onEmaPeriodChange,
-    emaRsiEnabled,
-    onEmaRsiEnabledChange,
-    emaRsiTimeframe,
-    onEmaRsiTimeframeChange,
-    emaRsiSettings,
-    onEmaRsiSettingsChange,
-    emaMacdEnabled,
-    onEmaMacdEnabledChange,
-    emaMacdTimeframe,
-    onEmaMacdTimeframeChange,
-    emaSummary,
   } = model;
 
   return (
@@ -137,11 +95,8 @@ export default function AlertForm({ model, onSubmit }: Props) {
         <button className={kind === "macd" ? "selected" : ""} onClick={() => onKindChange("macd")}>
           MACD cross
         </button>
-        <button className={kind === "ema" ? "selected" : ""} onClick={() => onKindChange("ema")}>
-          EMA cross
-        </button>
-        <button className={kind === "prediction" ? "selected" : ""} onClick={() => onKindChange("prediction")}>
-          Prediction
+        <button className={kind === "pattern" ? "selected" : ""} onClick={() => onKindChange("pattern")}>
+          Chart pattern
         </button>
       </div>
       <form onSubmit={onSubmit} className="alert-form">
@@ -384,16 +339,16 @@ export default function AlertForm({ model, onSubmit }: Props) {
             </div>
           </div>
         )}
-        {kind === "ema" && (
+        {kind === "pattern" && (
           <div className="macd-config">
             <div className="config-row">
               <label>
                 Timeframe
                 <select
-                  name="timeframe"
-                  value={emaTimeframe}
+                  name="pattern_timeframe"
+                  value={patternTimeframe}
                   onChange={(event) =>
-                    onEmaTimeframeChange(event.target.value as (typeof timeframes)[number])
+                    onPatternTimeframeChange(event.target.value as (typeof timeframes)[number])
                   }
                 >
                   {timeframes.map((timeframe) => (
@@ -403,247 +358,27 @@ export default function AlertForm({ model, onSubmit }: Props) {
                   ))}
                 </select>
               </label>
-              <label>
-                EMA
-                <select
-                  name="ema_period"
-                  value={emaPeriod}
-                  onChange={(event) => onEmaPeriodChange(event.target.value)}
-                >
-                  <option value="100">EMA 100</option>
-                  <option value="200">EMA 200</option>
-                </select>
-              </label>
             </div>
             <p className="config-hint">
-              Fires when a completed candle closes on the opposite side of the EMA from the
-              previous candle. New alerts arm at the latest close, so they do not replay an old
-              cross.
+              The backend watches the last 50 candles for head and shoulders, double tops and
+              bottoms, triangles and wedges. It tells you when a shape is still forming, with the
+              entry, invalidation and target it pinned, and again when a completed candle closes
+              through that entry at the same target. A shape already finished when the alert is
+              created arms silently instead of replaying it.
             </p>
-
-            <fieldset className="config-block">
-              <legend>RSI context</legend>
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  name="ema_rsi_enabled"
-                  checked={emaRsiEnabled}
-                  onChange={(event) => onEmaRsiEnabledChange(event.target.checked)}
-                />{" "}
-                Use a custom RSI period and levels
-              </label>
-              <div className="config-row">
-                <label>
-                  RSI timeframe
-                  <select
-                    name="ema_rsi_timeframe"
-                    value={emaRsiTimeframe}
-                    onChange={(event) =>
-                      onEmaRsiTimeframeChange(event.target.value as ContextTimeframe)
-                    }
-                  >
-                    {contextTimeframes.map((timeframe) => (
-                      <option key={timeframe} value={timeframe}>
-                        {timeframe}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {emaRsiEnabled && (
-                  <>
-                    <label>
-                      Period
-                      <input
-                        name="ema_rsi_period"
-                        type="number"
-                        min="2"
-                        max="100"
-                        value={emaRsiSettings.period}
-                        onChange={(event) =>
-                          onEmaRsiSettingsChange({ ...emaRsiSettings, period: event.target.value })
-                        }
-                      />
-                    </label>
-                    <label>
-                      Oversold
-                      <input
-                        name="ema_rsi_oversold"
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={emaRsiSettings.oversold}
-                        onChange={(event) =>
-                          onEmaRsiSettingsChange({ ...emaRsiSettings, oversold: event.target.value })
-                        }
-                      />
-                    </label>
-                    <label>
-                      Overbought
-                      <input
-                        name="ema_rsi_overbought"
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={emaRsiSettings.overbought}
-                        onChange={(event) =>
-                          onEmaRsiSettingsChange({ ...emaRsiSettings, overbought: event.target.value })
-                        }
-                      />
-                    </label>
-                  </>
-                )}
-              </div>
-              {fieldErrors.rsi_period && (
-                <p className="field-error">{fieldErrors.rsi_period}</p>
-              )}
-              {fieldErrors.rsi_oversold && (
-                <p className="field-error">{fieldErrors.rsi_oversold}</p>
-              )}
-              {fieldErrors.rsi_overbought && (
-                <p className="field-error">{fieldErrors.rsi_overbought}</p>
-              )}
-              <p className="config-note">
-                Included in every EMA alert. Starts on the EMA timeframe; choose another interval
-                here to override it. Labels momentum as bullish / bearish / bullish-balanced /
-                bearish-balanced.
-              </p>
-            </fieldset>
-
-            <fieldset className="config-block">
-              <legend>MACD trend context</legend>
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  name="macd_context_enabled"
-                  checked={emaMacdEnabled}
-                  onChange={(event) => onEmaMacdEnabledChange(event.target.checked)}
-                />{" "}
-                Include MACD trend context
-              </label>
-              <div className="config-row">
-                <label>
-                  MACD timeframe
-                  <select
-                    name="macd_context_timeframe"
-                    value={emaMacdTimeframe}
-                    onChange={(event) =>
-                      onEmaMacdTimeframeChange(event.target.value as ContextTimeframe)
-                    }
-                    disabled={!emaMacdEnabled}
-                  >
-                    {contextTimeframes.map((timeframe) => (
-                      <option key={timeframe} value={timeframe}>
-                        {timeframe}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <p className="config-note">
-                Compares the MACD line with its signal line on the selected timeframe and adds
-                MACD: Bullish or MACD: Bearish to the alert.
-              </p>
-            </fieldset>
-
             <div className="macd-summary" aria-live="polite">
               <b>This alert will</b>
-              <p>{emaSummary}</p>
+              <p>{patternSummary}</p>
             </div>
           </div>
         )}
-        {kind === "prediction" && (
-          <div className="macd-config">
-            <div className="config-row">
-              <label>
-                Timeframe
-                <select
-                  name="prediction_timeframe"
-                  value={predictionTimeframe}
-                  onChange={(event) => onPredictionTimeframeChange(event.target.value)}
-                >
-                  {timeframes.map((timeframe) => (
-                    <option
-                      key={timeframe}
-                      value={timeframe}
-                      disabled={predictionStageA && timeframe !== "1h"}
-                    >
-                      {timeframe}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Trend EMA
-                <select
-                  value={predictionTrendPeriod}
-                  onChange={(event) => onPredictionTrendPeriodChange(event.target.value)}
-                >
-                  <option value="100">EMA 100</option>
-                  <option value="200">EMA 200</option>
-                </select>
-              </label>
-            </div>
-
-            <fieldset className="config-block">
-              <legend>
-                Stage A <span className="legend-note">multi-timeframe breakout</span>
-              </legend>
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={predictionStageA}
-                  onChange={(event) => {
-                    onPredictionStageAChange(event.target.checked);
-                    if (event.target.checked) onPredictionTimeframeChange("1h");
-                  }}
-                />{" "}
-                Early warning, breakout, and failed breakout
-              </label>
-              <p className="config-hint">
-                4H major levels and 100 EMA context, 1H completed-candle trigger with a
-                0.25×ATR buffer and 1.5× relative volume, optional 15M retest. BBW squeeze
-                below the 15th percentile of its last 100 candles. A configurable 0–100
-                quality score rates confluence; 80+ is high confluence, not a probability.
-              </p>
-            </fieldset>
-
-            <fieldset className="config-block">
-              <legend>
-                Stage B <span className="legend-note">breakout confirmed</span>
-              </legend>
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={predictionStageB}
-                  onChange={(event) => onPredictionStageBChange(event.target.checked)}
-                />{" "}
-                Breakout confirmation
-              </label>
-              <p className="config-hint">
-                A completed candle closes through a level by at least 0.1×ATR, volume exceeds
-                1.5× its 20-candle average, Bollinger Band Width expands, and RSI plus the
-                selected EMA support the direction.
-              </p>
-            </fieldset>
-
-            {fieldErrors.prediction && (
-              <p className="field-error">{fieldErrors.prediction}</p>
-            )}
-            <div className="macd-summary" aria-live="polite">
-              <b>This alert will</b>
-              <p>{predictionSummary}</p>
-            </div>
-          </div>
-        )}
-        {kind !== "prediction" && (
-          <label>
-            Trigger frequency
-            <select name="frequency" defaultValue="every">
-              <option value="once">Once — disable after trigger</option>
-              <option value="every">Repeat — 60s</option>
-            </select>
-          </label>
-        )}
+        <label>
+          Trigger frequency
+          <select name="frequency" defaultValue="every">
+            <option value="once">Once — disable after trigger</option>
+            <option value="every">Repeat — 60s</option>
+          </select>
+        </label>
         <label className="wide">
           Note <span className="optional">OPTIONAL</span>
           <input

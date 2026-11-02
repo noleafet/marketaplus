@@ -133,9 +133,8 @@ class Alert(models.Model):
     class Kind(models.TextChoices):
         PRICE = "price", "Price"
         MACD = "macd", "MACD cross"
-        EMA = "ema", "EMA cross"
         RSI = "rsi", "RSI"
-        PREDICTION = "prediction", "Two-stage prediction"
+        PATTERN = "pattern", "Chart pattern"
 
     class Condition(models.TextChoices):
         CROSS_UP = "cross_up", "Crosses above"
@@ -188,44 +187,41 @@ class Alert(models.Model):
     trend_enabled = models.BooleanField(default=True, help_text="Enable EMA trend context by default")
     trend_period = models.PositiveSmallIntegerField(default=100, null=True, blank=True, help_text="EMA period for the trend filter (defaults to the 100 EMA)")
 
-    # EMA-cross alert. The main timeframe decides the price/EMA crossing; RSI reuses the
-    # context fields above, while MACD has its own optional timeframe.
-    ema_period = models.PositiveSmallIntegerField(
-        default=100, help_text="EMA period for EMA cross alerts (100 or 200)",
-    )
-    macd_context_enabled = models.BooleanField(
-        default=True, help_text="Include MACD trend context in EMA cross alerts",
-    )
-    macd_context_timeframe = models.CharField(
-        max_length=3, blank=True, default="1h",
-        help_text="Timeframe for the MACD trend context (defaults to 1h)",
-    )
-
-    # Stage A is a multi-timeframe breakout detector. Its persisted state prevents a
-    # squeeze episode, breakout or failed breakout from being reported twice. Stage B
-    # remains the original single-timeframe confirmation rule.
-    class PredictionAState(models.TextChoices):
+    # Chart-pattern alerts walk one shape through idle -> forming -> entered. The forming
+    # event pins the numbers the entry event has to repeat, so a sloped neckline is stored
+    # with its per-bar drift and re-quoted as the window slides.
+    class PatternState(models.TextChoices):
         IDLE = "idle", "Idle"
-        EARLY = "early", "Early warning"
-        BREAKOUT = "breakout", "Breakout"
+        FORMING = "forming", "Forming"
+        ENTERED = "entered", "Entered"
 
-    prediction_stage_a = models.BooleanField(default=True, help_text="Enable the multi-timeframe breakout warning")
-    prediction_stage_b = models.BooleanField(default=True, help_text="Enable the confirmed-breakout alert")
-    prediction_a_state = models.CharField(
-        max_length=12, choices=PredictionAState.choices, default=PredictionAState.IDLE,
-        help_text="Internal state: idle, early warning sent, or breakout awaiting failure",
+    pattern_state = models.CharField(
+        max_length=12, choices=PatternState.choices, default=PatternState.IDLE,
+        help_text="Internal state: waiting, warned about a forming shape, or entered on the break",
     )
-    prediction_a_last_bar_time = models.DateTimeField(
-        null=True, blank=True,
-        help_text="Internal state: last completed 1H bar evaluated by Stage A",
+    pattern_key = models.CharField(max_length=40, blank=True, default="")
+    pattern_bias = models.CharField(max_length=8, blank=True, default="")
+    pattern_signature = models.CharField(
+        max_length=120, blank=True, default="",
+        help_text="Internal state: the formation already reported on this alert",
     )
-    prediction_a_direction = models.CharField(max_length=8, blank=True, default="")
-    prediction_a_level = models.JSONField(
+    pattern_entry = models.JSONField(
         default=dict, blank=True,
-        help_text="Internal state: the 4H level active in the Stage A state machine",
+        help_text="Internal state: the pinned entry level and its drift per bar",
     )
-    prediction_a_score = models.PositiveSmallIntegerField(null=True, blank=True)
-    prediction_a_high_confluence = models.BooleanField(default=False)
+    pattern_target = models.FloatField(null=True, blank=True)
+    pattern_invalidation = models.JSONField(
+        default=dict, blank=True,
+        help_text="Internal state: the pinned level that cancels the setup",
+    )
+    pattern_end_time = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Internal state: the last bar of the formation currently pinned",
+    )
+    pattern_last_bar_time = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Internal state: last completed bar evaluated by the pattern monitor",
+    )
 
     # Optional line-based price alert, preserving the drawing alert semantics of TradeChartAlert.
     line_type = models.CharField(max_length=8, choices=LineType.choices, blank=True, default="")
@@ -250,26 +246,13 @@ class Alert(models.Model):
     def effective_trend_timeframe(self):
         return self.trend_timeframe or "1h"
 
-    @property
-    def effective_macd_context_timeframe(self):
-        """MACD context follows 1h unless the EMA-cross alert stores its own interval."""
-        return self.macd_context_timeframe or "1h"
-
     def __str__(self):
         if self.kind == self.Kind.MACD:
             target = f"MACD {self.timeframe}"
-        elif self.kind == self.Kind.EMA:
-            target = f"EMA {self.ema_period or 100} {self.timeframe}"
         elif self.kind == self.Kind.RSI:
             target = f"RSI {self.timeframe}"
-        elif self.kind == self.Kind.PREDICTION:
-            stages = "".join(
-                stage for stage, enabled in (
-                    ("A", self.prediction_stage_a),
-                    ("B", self.prediction_stage_b),
-                ) if enabled
-            ) or "no stages"
-            target = f"prediction {stages} {self.timeframe}"
+        elif self.kind == self.Kind.PATTERN:
+            target = f"pattern {self.pattern_key or 'any'} {self.timeframe}"
         else:
             target = str(self.price or "line")
         return f"{self.symbol} {self.condition} {target}"

@@ -16,34 +16,10 @@ Marketa+ combines a **Next.js dashboard**, **Django REST API**, and **PostgreSQL
 - **Charts:** Candlesticks, volume, Heikin Ashi, EMA, Bollinger Bands, MACD, RSI, ATR, key levels, and 1H/4H/1D trend-bias channels.
 - **Watchlist:** Database-backed symbols, exchange selection, and optional scan columns for volume versus the previous 20-candle average, RSI-14, EMA-100, MACD line-minus-signal difference, and open interest (from the futures market).
 - **Key levels:** Nearby support/resistance zones scored from 0–100 using swing reactions, rejection, higher-timeframe confluence, volume, and recency. Only levels scoring at least 40 are displayed.
-- **Alerts:** Price, MACD cross, EMA cross, drawing-line, and two-stage breakout/prediction alerts. Browser notifications, sound, and optional Telegram delivery are supported.
+- **Alerts:** Price, MACD cross, drawing-line, and chart-pattern alerts. Browser notifications, sound, and optional Telegram delivery are supported.
 - **Pattern monitor:** Checks the latest 50 candles every 60 seconds; identifies patterns that are forming or confirmed, projects triggers and measured targets, and saves chart snapshots.
 - **Market events:** CoinMarketCal event scraping for watchlist coins every 4 hours from 02:00 UTC, using CoinGecko coin IDs/slugs without a provider API key.
 - **Persistence:** Django stores alerts, trigger history, watchlist symbols, exchange settings, and pattern snapshots. Chart preferences and drawings remain browser-local.
-
-## Prediction rules
-
-Prediction checks use completed candles and run every 60 seconds.
-
-### Stage A — Multi-timeframe breakout
-
-- **Context:** 4H levels and EMA-100 trend; 1H breakout trigger; optional 15M retest refinement.
-- **Early warning:** Bollinger Band Width is in the lowest 15% of its last 100 candles, and price is within `0.75 × ATR` of a key level scoring at least 60/100.
-- **Breakout:** A completed 1H candle closes at least `0.25 × ATR` beyond the level, with volume at least `1.5×` its 20-candle average.
-- **High confluence:** Breakout plus 4H/1H trend alignment, directional RSI above/below 50, ATR expansion, at least `1.5 × ATR` of room to the next opposing level, and a score of 80+.
-- **Failed breakout:** Fires once when a later completed candle closes back inside the broken range.
-
-The score weights squeeze (15), key level (15), breakout confirmation (25), volume (20), trend (10), RSI (5), ATR expansion (5), and room (5). **A score of 80 is not an 80% success probability and cannot replace the breakout trigger.**
-
-### Stage B — Single-timeframe confirmation
-
-Requires a completed candle to cross at least `0.1 × ATR` beyond a key level, volume above `1.5×` its 20-candle average, expanding Bollinger Band Width, and RSI plus the selected EMA-100/EMA-200 agreeing with the direction.
-
-When both stages are enabled, Stage B is suppressed for a bar where Stage A reports a breakout to prevent duplicate alerts.
-
-### EMA-cross alerts
-
-Triggers when a completed candle closes on the opposite side of the selected EMA-100 or EMA-200 from the previous candle. RSI and optional MACD context are informational; they do not block the alert.
 
 ## Architecture
 
@@ -53,9 +29,8 @@ Triggers when a completed candle closes on the opposite side of the selected EMA
   - `src/lib/` — API client, market data adapters, indicators, chart helpers, formatting, and storage.
   - `src/types/`, `src/styles/` — shared types and styling.
 - `backend/` — Django REST Framework API and alert evaluator.
-  - `backend/alerts/prediction.py` — pure key-level and prediction-rule calculations.
 - **Database:** PostgreSQL; SQLite is used when `DATABASE_URL` is not set.
-- **Scheduler:** `run_alerts` runs regular alert checks, prediction checks every 60 seconds, and market-event sync every 4 hours from 02:00 UTC (02, 06, 10, 14, 18, 22). Run only one scheduler per app instance.
+- **Scheduler:** `run_alerts` runs regular alert checks, the chart-pattern monitor every 60 seconds, and market-event sync every 4 hours from 02:00 UTC (02, 06, 10, 14, 18, 22). Run only one scheduler per app instance.
 - **Configuration:** Exchange URL/timeout, polling interval, and Telegram settings are stored in the Django admin configuration.
 
 ## Requirements
@@ -163,7 +138,7 @@ npm run build
 Run from `backend/` with the environment and database configured:
 
 ```sh
-# Check regular and prediction alerts once
+# Check price, MACD and drawing-line alerts once
 python manage.py check_alerts
 
 # Sync upcoming market events
@@ -179,7 +154,7 @@ python manage.py run_alerts
 python manage.py run_alerts --interval 10
 ```
 
-The scheduler reads active rules, fetches exchange data, records fired notifications as `TriggerEvent`, and sends enabled Telegram messages. One-shot alerts deactivate after firing; repeating price alerts use a 60-second cooldown. EMA/MACD crosses and prediction rules use completed candles and avoid replaying old crosses on startup. Network/API errors are logged and retried on the next run.
+The scheduler reads active rules, fetches exchange data, records fired notifications as `TriggerEvent`, and sends enabled Telegram messages. One-shot alerts deactivate after firing; repeating price alerts use a 60-second cooldown. MACD crosses and chart patterns use completed candles and avoid replaying old signals on startup. Network/API errors are logged and retried on the next run.
 
 ## API overview
 
@@ -198,7 +173,7 @@ The scheduler reads active rules, fetches exchange data, records fired notificat
 | `POST /api/telegram/find-chat/` | Find the latest Telegram chat using a bot token |
 | `POST /api/telegram/test/` | Send a one-off test message without saving submitted credentials |
 | `GET /api/engine/jobs/` | List runnable scheduler jobs |
-| `POST /api/engine/run/` | Run an alert, prediction, or event-sync job on demand |
+| `POST /api/engine/run/` | Run an alert, pattern, or event-sync job on demand |
 | `GET /api/health/` | Health check |
 
 Telegram POST helpers use Django CSRF protection. Fetch a token from `GET /api/telegram/csrf/` first; Swagger UI reuses the `csrftoken` cookie automatically.
@@ -232,40 +207,7 @@ Full schema: http://localhost:8000/api/schema/
 }
 ```
 
-**EMA cross**
-
-```json
-{
-  "symbol": "BTCUSDT",
-  "kind": "ema",
-  "condition": "cross",
-  "timeframe": "1h",
-  "frequency": "every",
-  "ema_period": 100,
-  "rsi_timeframe": "1h",
-  "macd_context_enabled": true,
-  "macd_context_timeframe": "1h"
-}
-```
-
-Supported intervals: `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w`. EMA-cross `ema_period` accepts `100` or `200` and defaults to `100`. MACD uses EMA periods 12/26/9 seeded with an SMA.
-
-**Prediction alert**
-
-```json
-{
-  "symbol": "BTCUSDT",
-  "kind": "prediction",
-  "condition": "cross",
-  "timeframe": "1h",
-  "frequency": "every",
-  "prediction_stage_a": true,
-  "prediction_stage_b": true,
-  "trend_period": 100
-}
-```
-
-At least one prediction stage must be enabled. Stage A requires the `1h` alert timeframe; Stage B can use any supported interval. `trend_period` accepts 2–500 and defaults to 100. Stage A weights and the high-confluence threshold can be overridden with `PREDICTION_STAGE_A_SCORE_WEIGHTS` and `PREDICTION_STAGE_A_HIGH_CONFLUENCE_SCORE`.
+Supported intervals: `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w`. MACD uses EMA periods 12/26/9 seeded with an SMA.
 
 ## Configuration and security
 

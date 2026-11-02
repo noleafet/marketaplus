@@ -13,10 +13,10 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import Alert, AppConfiguration, Exchange, Notification, TriggerEvent
-from .prediction import (
-    STAGE_A_CONTEXT_TIMEFRAME, STAGE_A_HIGH_CONFLUENCE_SCORE, STAGE_A_MAIN_TIMEFRAME,
-    STAGE_A_REFINEMENT_TIMEFRAME, prediction_snapshot, stage_a_evaluate, stage_a_event,
-    stage_a_snapshot, stage_b_event, stage_b_signal,
+from .patterns import DETECTED_PATTERN_KEYS as PATTERN_SCAN_KEYS
+from .patterns import (
+    PATTERN_LABELS, RECENT_BARS as PATTERN_RECENT_BARS, best_pattern, detect_patterns,
+    pattern_evaluate,
 )
 
 logger = logging.getLogger(__name__)
@@ -95,8 +95,8 @@ def get_market_candles(symbol, timeframe, exchange, limit=500):
 def _closed_bars(symbol, timeframe, exchange, limit=500):
     """Normalized bars with the still-forming candle removed.
 
-    Prediction rules act on completed candles, so the exchange's newest kline is
-    discarded until its close time has passed.
+    Breakout and pattern rules act on completed candles, so the exchange's newest
+    kline is discarded until its close time has passed.
     """
     candles = _candles_for(symbol, timeframe, exchange, limit)
     now_ms = int(time.time() * 1000)
@@ -237,46 +237,6 @@ def _trend_signal(symbol, timeframe, exchange, period=100):
     }
 
 
-def _ema_signal(symbol, timeframe, exchange, period=100):
-    """Return the latest two closed closes and their EMA values for a crossing check."""
-    candles = _candles_for(symbol, timeframe, exchange, max(period + 100, 500))
-    now_ms = int(time.time() * 1000)
-    closed = [candle for candle in candles if int(candle[6]) < now_ms]
-    if len(closed) < period + 1:
-        return None
-    closes = [float(candle[4]) for candle in closed]
-    series = _ema_series(closes, period)
-    index = len(closed) - 1
-    if series[index - 1] is None or series[index] is None:
-        return None
-    return {
-        "bar_time": datetime.fromtimestamp(int(closed[index][0]) / 1000, tz=dt_timezone.utc),
-        "close": closes[index],
-        "ema": series[index],
-        "previous_close": closes[index - 1],
-        "previous_ema": series[index - 1],
-        "volume_percent": _volume_percent(closed),
-    }
-
-
-def _price_side(close, ema):
-    if close > ema:
-        return 1
-    if close < ema:
-        return -1
-    return 0
-
-
-def _ema_crossed(previous_close, previous_ema, close, ema):
-    """A cross needs two completed candles on opposite sides of their EMA values."""
-    previous_side = _price_side(previous_close, previous_ema)
-    current_side = _price_side(close, ema)
-    return (
-        previous_side != 0 and current_side != 0 and previous_side != current_side,
-        current_side,
-    )
-
-
 def _rsi_classification(alert, rsi):
     """Classify RSI momentum as bullish or bearish, adding a balanced qualifier near the middle. Informational only."""
     value = rsi["rsi"]
@@ -367,153 +327,6 @@ def _macd_alert_message(alert, macd, *, status, rsi, trend, distance=None, subje
         _volume_line(macd.get("volume_percent")),
         f"Report: {_report_url(alert, macd['bar_time'], subject=subject)}",
     ])
-    return "\n".join(lines)
-
-
-def _macd_classification(macd):
-    """Classify the MACD line against its signal line for EMA-cross context."""
-    if not macd:
-        return None
-    difference = macd.get("current_diff")
-    if difference is None:
-        return None
-    if difference > 0:
-        return "bullish"
-    if difference < 0:
-        return "bearish"
-    return "bullish-balanced"
-
-
-def _ema_alert_message(alert, ema, *, status, rsi, macd):
-    rsi_state = (
-        f"{rsi['rsi']:.0f} {_rsi_classification(alert, rsi).title()}"
-        if rsi else "–"
-    )
-    lines = [
-        f"Status: {status.capitalize()}",
-        f"Current Price: {_format_price(ema['close'])}",
-        f"RSI: {rsi_state}",
-    ]
-    if alert.macd_context_enabled:
-        macd_state = _macd_classification(macd)
-        lines.append(f"MACD: {macd_state.title() if macd_state else '–'}")
-    lines.append(_volume_line(ema.get("volume_percent")))
-    lines.append(f"Report: {_report_url(alert, ema['bar_time'])}")
-    return "\n".join(lines)
-
-
-def _prediction_alert_message(alert, snapshot, signal):
-    """Format a Stage B prediction event like the MACD and EMA alert messages."""
-    status = "Bullish" if signal["direction"] == "long" else "Bearish"
-    volume_ratio = snapshot.get("volume_ratio")
-    level = signal["level"]
-    side = level["kind"].capitalize()
-    lines = [
-        f"Status: {status}",
-        f"Current Price: {_format_price(snapshot['close'])}",
-        (
-            f"RSI ({alert.timeframe}): {snapshot['rsi']:.0f} "
-            f"{_rsi_classification(alert, snapshot).title()}"
-        ),
-        (
-            f"EMA {snapshot['ema_period']} ({alert.timeframe}): "
-            f"{_format_indicator(snapshot['ema'])} "
-            f"{_trend_classification(alert, snapshot).title()}"
-        ),
-        _volume_line(volume_ratio * 100 if volume_ratio is not None else None),
-        (
-            f"Breakout: {side} {_format_price(level['price'])}, "
-            f"{signal['breakout_atr']:.2f}×ATR"
-        ),
-    ]
-    if alert.note:
-        lines.append(f"Note: {alert.note}")
-    lines.append(f"Report: {_report_url(alert, snapshot['bar_time'])}")
-    return "\n".join(lines)
-
-
-def _stage_a_alert_message(alert, snapshot, signal):
-    """Format a Stage A event with its multi-timeframe context and quality score."""
-    bias = "Bullish" if signal["direction"] == "long" else "Bearish"
-    event = signal.get("event")
-    status = {
-        "early": f"Early warning - {bias}",
-        "breakout": f"Breakout - {bias}",
-        "failed": f"Failed breakout - {bias}",
-    }.get(event, bias)
-
-    timeframe = snapshot.get("timeframe", alert.timeframe)
-    context_timeframe = snapshot.get("context_timeframe", STAGE_A_CONTEXT_TIMEFRAME)
-    context = snapshot.get("context") or {}
-    volume_ratio = snapshot.get("volume_ratio")
-    level = signal["level"]
-    side = level["kind"].capitalize()
-
-    lines = [
-        f"Status: {status}",
-        f"Current Price: {_format_price(snapshot['close'])}",
-        (
-            f"RSI ({timeframe}): {snapshot['rsi']:.0f} "
-            f"{_rsi_classification(alert, snapshot).title()}"
-        ),
-        (
-            f"EMA {snapshot['ema_period']} ({timeframe}): "
-            f"{_format_indicator(snapshot['ema'])} "
-            f"{_trend_classification(alert, snapshot).title()}"
-        ),
-    ]
-    if context.get("ema") is not None:
-        lines.append(
-            f"EMA {context.get('ema_period', snapshot['ema_period'])} ({context_timeframe}): "
-            f"{_format_indicator(context['ema'])} "
-            f"{_trend_classification(alert, context).title()}"
-        )
-    lines.append(_volume_line(volume_ratio * 100 if volume_ratio is not None else None))
-
-    if event == "early":
-        lines.append(
-            f"Level: {side} {_format_price(level['price'])} "
-            f"({level['strength']}/100), {signal['distance_atr']:.2f}×ATR away"
-        )
-    elif event == "breakout":
-        lines.append(
-            f"Breakout: {side} {_format_price(level['price'])}, "
-            f"{signal['breakout_atr']:.2f}×ATR"
-        )
-    else:
-        failed_atr = signal.get("failed_atr")
-        detail = f", {failed_atr:.2f}×ATR back inside" if failed_atr is not None else ""
-        lines.append(
-            f"Failed: {side} {_format_price(level['price'])}{detail}"
-        )
-
-    score = signal.get("score")
-    if score is not None:
-        label = " - High confluence" if signal.get("high_confluence") else ""
-        lines.append(f"Score: {score}/100{label}")
-
-    if event != "failed" and signal.get("next_level") is not None:
-        next_level = signal["next_level"]
-        room = signal.get("room_atr")
-        if room is not None:
-            lines.append(
-                f"Room: {room:.2f}×ATR to next {next_level['kind']} "
-                f"at {_format_price(next_level['price'])}"
-            )
-    elif event == "breakout":
-        lines.append("Room: open-ended")
-
-    retest = signal.get("retest")
-    if retest is not None:
-        lines.append(f"{STAGE_A_REFINEMENT_TIMEFRAME}: {'Retest held' if retest else 'No retest yet'}")
-
-    if event == "breakout" and signal.get("high_confluence"):
-        # A score is a setup-quality label, not a probability of success.
-        lines.append("Quality: High confluence (not a success probability)")
-
-    if alert.note:
-        lines.append(f"Note: {alert.note}")
-    lines.append(f"Report: {_report_url(alert, snapshot['bar_time'])}")
     return "\n".join(lines)
 
 
@@ -680,31 +493,20 @@ def check_alerts(*, stdout=None):
     """Fetch current market values, persist alert state/events, and notify on hits."""
     configuration = AppConfiguration.load()
     exchange = Exchange.load()
-    alerts = list(
-        Alert.objects.filter(active=True).exclude(kind=Alert.Kind.PREDICTION).order_by("id")
-    )
+    alerts = list(Alert.objects.filter(active=True).order_by("id"))
     price_symbols = {a.symbol for a in alerts if a.kind == Alert.Kind.PRICE}
     macd_keys = {(a.symbol, a.timeframe) for a in alerts if a.kind == Alert.Kind.MACD}
-    # An EMA-cross alert can also request MACD trend context on its own interval.
-    macd_keys.update(
-        (a.symbol, a.effective_macd_context_timeframe)
-        for a in alerts if a.kind == Alert.Kind.EMA and a.macd_context_enabled
-    )
-    ema_keys = {
-        (a.symbol, a.timeframe, a.ema_period or 100)
-        for a in alerts if a.kind == Alert.Kind.EMA
-    }
     # MACD alerts always report RSI and the EMA trend in their message, even when the
-    # separate confirmation toggles are off. EMA-cross alerts also carry RSI context.
+    # separate confirmation toggles are off.
     rsi_keys = {
         (a.symbol, a.effective_rsi_timeframe, a.rsi_period or 14)
-        for a in alerts if a.kind in {Alert.Kind.RSI, Alert.Kind.MACD, Alert.Kind.EMA}
+        for a in alerts if a.kind in {Alert.Kind.RSI, Alert.Kind.MACD}
     }
     trend_keys = {
         (a.symbol, a.effective_trend_timeframe, a.trend_period or 100)
         for a in alerts if a.kind == Alert.Kind.MACD
     }
-    prices, macd_values, ema_values, rsi_values, trend_values = {}, {}, {}, {}, {}
+    prices, macd_values, rsi_values, trend_values = {}, {}, {}, {}
     for symbol in sorted(price_symbols):
         try:
             prices[symbol] = _price_for(symbol, exchange)
@@ -715,11 +517,6 @@ def check_alerts(*, stdout=None):
             macd_values[(symbol, timeframe)] = _macd_signal(symbol, timeframe, exchange)
         except (requests.RequestException, KeyError, ValueError) as exc:
             logger.warning("Could not fetch %s %s MACD: %s", symbol, timeframe, exc)
-    for symbol, timeframe, period in sorted(ema_keys):
-        try:
-            ema_values[(symbol, timeframe, period)] = _ema_signal(symbol, timeframe, exchange, period)
-        except (requests.RequestException, KeyError, ValueError) as exc:
-            logger.warning("Could not fetch %s %s EMA: %s", symbol, timeframe, exc)
     for symbol, timeframe, period in sorted(rsi_keys):
         try:
             rsi_values[(symbol, timeframe, period)] = _rsi_signal(symbol, timeframe, exchange, period)
@@ -736,15 +533,9 @@ def check_alerts(*, stdout=None):
     for snapshot in alerts:
         value = prices.get(snapshot.symbol) if snapshot.kind == Alert.Kind.PRICE else None
         macd = macd_values.get((snapshot.symbol, snapshot.timeframe)) if snapshot.kind == Alert.Kind.MACD else None
-        ema = ema_values.get((
-            snapshot.symbol, snapshot.timeframe, snapshot.ema_period or 100,
-        )) if snapshot.kind == Alert.Kind.EMA else None
-        macd_context = macd_values.get((
-            snapshot.symbol, snapshot.effective_macd_context_timeframe,
-        )) if snapshot.kind == Alert.Kind.EMA and snapshot.macd_context_enabled else None
         rsi = rsi_values.get((
             snapshot.symbol, snapshot.effective_rsi_timeframe, snapshot.rsi_period or 14,
-        )) if snapshot.kind in {Alert.Kind.RSI, Alert.Kind.MACD, Alert.Kind.EMA} else None
+        )) if snapshot.kind in {Alert.Kind.RSI, Alert.Kind.MACD} else None
         trend = trend_values.get((
             snapshot.symbol, snapshot.effective_trend_timeframe, snapshot.trend_period or 100,
         )) if snapshot.kind == Alert.Kind.MACD else None
@@ -753,8 +544,6 @@ def check_alerts(*, stdout=None):
         if snapshot.kind == Alert.Kind.RSI and rsi is None:
             continue
         if snapshot.kind == Alert.Kind.MACD and macd is None:
-            continue
-        if snapshot.kind == Alert.Kind.EMA and ema is None:
             continue
         with transaction.atomic():
             alert = Alert.objects.select_for_update().filter(pk=snapshot.pk, active=True).first()
@@ -842,36 +631,6 @@ def check_alerts(*, stdout=None):
                             observed_value=macd["close"],
                         )
                         alert.macd_triggered = True
-            elif alert.kind == Alert.Kind.EMA:
-                bar_time = ema["bar_time"]
-                if alert.last_bar_open_time is None:
-                    # Arm at the latest closed candle; never report an old cross on first startup.
-                    alert.last_bar_open_time = bar_time
-                    alert.last_observed_value = ema["close"]
-                elif bar_time > alert.last_bar_open_time:
-                    hit, current_side = _ema_crossed(
-                        ema["previous_close"], ema["previous_ema"], ema["close"], ema["ema"],
-                    )
-                    if alert.condition == Alert.Condition.CROSS_UP:
-                        hit = hit and current_side > 0
-                    elif alert.condition == Alert.Condition.CROSS_DOWN:
-                        hit = hit and current_side < 0
-                    alert.last_bar_open_time = bar_time
-                    alert.last_observed_value = ema["close"]
-                    if hit and _may_fire(alert, now):
-                        status = "bullish" if current_side > 0 else "bearish"
-                        event = TriggerEvent.objects.create(
-                            alert=alert,
-                            symbol=alert.symbol,
-                            title=(
-                                f"{alert.symbol}({alert.timeframe}) EMA Crossed"
-                                f" - {status.capitalize()}"
-                            ),
-                            message=_ema_alert_message(
-                                alert, ema, status=status, rsi=rsi, macd=macd_context,
-                            ),
-                            observed_value=ema["close"],
-                        )
             elif alert.kind == Alert.Kind.RSI:
                 bar_time = rsi["bar_time"]
                 rsi_value = rsi["rsi"]
@@ -927,179 +686,165 @@ def check_alerts(*, stdout=None):
     return fired
 
 
-def check_prediction_alerts(*, stdout=None):
-    """Evaluate enabled two-stage prediction alerts on closed candles.
+def _pattern_bias_word(bias):
+    return "Bullish" if bias == "bullish" else "Bearish"
 
-    The scheduler calls this on its own 60-second job. Snapshots are shared by
-    symbol/timeframe/EMA-period so several prediction rules on one market do not
-    each fetch the same candles.
+
+def _pattern_close_time(seconds):
+    return datetime.fromtimestamp(seconds, tz=dt_timezone.utc)
+
+
+def _pattern_event_title(alert, signal, state):
+    label = PATTERN_LABELS.get(state["key"], state["key"])
+    status = "Forming" if signal["event"] == "forming" else "Breakout"
+    return (
+        f"{alert.symbol}({alert.timeframe}) Pattern - {status} - {label} "
+        f"- {_pattern_bias_word(state['bias'])}"
+    )
+
+
+def _pattern_alert_message(alert, signal, state):
+    """Forming and breakout copy for a chart-pattern alert.
+
+    Both events close on the same ``Target:`` number so the pair reads as one trade plan, and
+    every line is ``Label: value`` so Telegram bolds the label and folds the report into a link.
+    """
+    label = PATTERN_LABELS.get(state["key"], state["key"])
+    forming = signal["event"] == "forming"
+    entry = state.get("entry") or {}
+    invalidation = state.get("invalidation") or {}
+    lines = [
+        f"Status: {'Forming' if forming else 'Breakout'} "
+        f"- {_pattern_bias_word(state['bias'])}",
+        f"Pattern: {label} ({alert.timeframe})",
+        f"Current Price: {_format_price(signal['close'])}",
+    ]
+    if forming:
+        lines.append(
+            f"Entry: close {'above' if entry['side'] == 'up' else 'below'} "
+            f"{_format_price(entry['price'])}"
+        )
+        if invalidation:
+            lines.append(
+                f"Invalidation: close {'above' if invalidation['side'] == 'up' else 'below'} "
+                f"{_format_price(invalidation['price'])}"
+            )
+    else:
+        lines.append(f"Breakout: {_format_price(signal['level'])}")
+    if state.get("target") is not None:
+        lines.append(f"Target: {_format_price(state['target'])}")
+    if alert.note:
+        lines.append(f"Note: {alert.note}")
+    lines.append(f"Report: {_report_url(alert, _pattern_close_time(signal['bar_time']))}")
+    return "\n".join(lines)
+
+
+def check_pattern_alerts(*, stdout=None):
+    """Advance chart-pattern alerts over the candles the chart itself would have drawn.
+
+    The shapes are found by ``alerts.patterns``, the backend's own copy of the chart rules, so
+    an alert never asks the browser what it sees. Candles are fetched once per symbol and
+    timeframe per poll, and an alert only moves on a newly closed bar, so the 60-second cadence
+    buys responsiveness rather than extra detections.
     """
     configuration = AppConfiguration.load()
     exchange = Exchange.load()
     alerts = list(
-        Alert.objects.filter(active=True, kind=Alert.Kind.PREDICTION).order_by("id")
+        Alert.objects.filter(active=True, kind=Alert.Kind.PATTERN).order_by("id")
     )
     if not alerts:
         return []
 
-    stage_b_keys = {
-        (alert.symbol, alert.timeframe, alert.trend_period or 100)
-        for alert in alerts
-        if alert.prediction_stage_b
-    }
-    stage_a_keys = {
-        (alert.symbol, alert.trend_period or 100)
-        for alert in alerts
-        if alert.prediction_stage_a
-    }
-
     bars_cache = {}
 
-    def closed_bars(symbol, timeframe):
-        """Fetch each symbol/timeframe once and remember failures for this poll."""
+    def recent_bars(symbol, timeframe):
+        """The newest slice of closed candles, with failures remembered for this poll."""
         key = (symbol, timeframe)
         if key not in bars_cache:
             try:
-                # 600 1H bars leave roughly 150 4H bars after Stage A clips the context
-                # feed to the trigger's close, comfortably above the 120-bar indicator
-                # warm-up even when an exchange omits a candle.
-                bars_cache[key] = _closed_bars(symbol, timeframe, exchange, 600)
+                # One extra candle, because the still-forming one is dropped before the
+                # detector sees the window.
+                closed = _closed_bars(symbol, timeframe, exchange, PATTERN_RECENT_BARS + 1)
+                bars_cache[key] = closed[-PATTERN_RECENT_BARS:]
             except (requests.RequestException, KeyError, IndexError, ValueError) as exc:
                 logger.warning(
-                    "Could not fetch %s %s prediction data: %s", symbol, timeframe, exc,
+                    "Could not fetch %s %s candles for pattern alerts: %s", symbol, timeframe, exc,
                 )
                 bars_cache[key] = None
         return bars_cache[key]
 
-    stage_b_snapshots = {}
-    for symbol, timeframe, ema_period in sorted(stage_b_keys):
-        bars = closed_bars(symbol, timeframe)
-        if bars is None:
-            continue
-        try:
-            stage_b_snapshots[(symbol, timeframe, ema_period)] = prediction_snapshot(
-                bars, ema_period=ema_period,
-            )
-        except (KeyError, IndexError, ValueError) as exc:
-            logger.warning(
-                "Could not build %s %s prediction snapshot: %s", symbol, timeframe, exc,
-            )
-
-    stage_a_snapshots = {}
-    for symbol, ema_period in sorted(stage_a_keys):
-        context_bars = closed_bars(symbol, STAGE_A_CONTEXT_TIMEFRAME)
-        main_bars = closed_bars(symbol, STAGE_A_MAIN_TIMEFRAME)
-        if context_bars is None or main_bars is None:
-            continue
-        # The 15M feed is an optional refinement. A failure there must not block the
-        # 1H breakout that has already been confirmed by the 4H context.
-        refinement_bars = closed_bars(symbol, STAGE_A_REFINEMENT_TIMEFRAME)
-        try:
-            stage_a_snapshots[(symbol, ema_period)] = stage_a_snapshot(
-                context_bars, main_bars, refinement_bars, ema_period=ema_period,
-            )
-        except (KeyError, IndexError, ValueError) as exc:
-            logger.warning(
-                "Could not build %s Stage A snapshot: %s", symbol, exc,
-            )
-
-    stage_a_weights = getattr(settings, "PREDICTION_STAGE_A_SCORE_WEIGHTS", None)
-    stage_a_threshold = getattr(
-        settings, "PREDICTION_STAGE_A_HIGH_CONFLUENCE_SCORE",
-        STAGE_A_HIGH_CONFLUENCE_SCORE,
-    )
-
     fired = []
     now = timezone.now()
-    for snapshot in alerts:
+    for candidate in alerts:
         with transaction.atomic():
             alert = Alert.objects.select_for_update().filter(
-                pk=snapshot.pk, active=True, kind=Alert.Kind.PREDICTION,
+                pk=candidate.pk, active=True, kind=Alert.Kind.PATTERN,
             ).first()
             if alert is None:
                 continue
-            market_b = stage_b_snapshots.get(
-                (alert.symbol, alert.timeframe, alert.trend_period or 100)
-            )
-            market_a = stage_a_snapshots.get((alert.symbol, alert.trend_period or 100))
-            if market_a is None and market_b is None:
+            bars = recent_bars(alert.symbol, alert.timeframe)
+            if not bars:
                 continue
-
-            events = []
-            stage_a_signal = None
-            if alert.prediction_stage_a and market_a is not None:
-                # A Stage A decision only advances on a new completed 1H bar. The same
-                # bar cannot create another warning or breakout on a later poll.
-                if (
-                    alert.prediction_a_last_bar_time is None
-                    or market_a["bar_time"] > alert.prediction_a_last_bar_time
-                ):
-                    state = {
-                        "state": alert.prediction_a_state,
-                        "direction": alert.prediction_a_direction,
-                        "level": alert.prediction_a_level or {},
-                        "score": alert.prediction_a_score,
-                        "high_confluence": alert.prediction_a_high_confluence,
-                    }
-                    stage_a_signal, state = stage_a_evaluate(
-                        market_a, state, weights=stage_a_weights,
-                        high_confluence_threshold=stage_a_threshold,
-                    )
-                    if stage_a_signal is not None:
-                        payload = stage_a_event(alert, market_a, stage_a_signal)
-                        payload["message"] = _stage_a_alert_message(
-                            alert, market_a, stage_a_signal,
-                        )
-                        events.append(TriggerEvent.objects.create(
-                            alert=alert, symbol=alert.symbol, **payload,
-                        ))
-                    alert.prediction_a_state = state.get("state") or "idle"
-                    alert.prediction_a_direction = state.get("direction") or ""
-                    alert.prediction_a_level = state.get("level") or {}
-                    alert.prediction_a_score = state.get("score")
-                    alert.prediction_a_high_confluence = bool(
-                        state.get("high_confluence")
-                    )
-                    alert.prediction_a_last_bar_time = market_a["bar_time"]
-
-            if alert.prediction_stage_b and market_b is not None:
-                # Only inspect a new completed candle. A breakout is a crossing event,
-                # so the same bar must not create one event per 60-second poll.
-                if (
-                    alert.last_bar_open_time is None
-                    or market_b["bar_time"] > alert.last_bar_open_time
-                ):
-                    # When Stage A already reported this exact breakout, Stage B on the
-                    # same bar would be a duplicate alert for the same market event.
-                    stage_a_reported_breakout = (
-                        stage_a_signal is not None
-                        and stage_a_signal.get("event") == "breakout"
-                    )
-                    if not stage_a_reported_breakout:
-                        signal = stage_b_signal(market_b)
-                        if signal is not None:
-                            payload = stage_b_event(alert, market_b, signal)
-                            payload["message"] = _prediction_alert_message(
-                                alert, market_b, signal,
-                            )
-                            events.append(TriggerEvent.objects.create(
-                                alert=alert, symbol=alert.symbol, **payload,
-                            ))
-                    alert.last_bar_open_time = market_b["bar_time"]
-
-            observed = market_b or market_a
-            if observed is not None:
-                alert.last_observed_value = observed["close"]
-                alert.last_rsi_value = observed["rsi"]
+            bar_time = _pattern_close_time(bars[-1]["time"])
+            if alert.pattern_last_bar_time is not None and bar_time <= alert.pattern_last_bar_time:
+                continue
+            state = {
+                "state": alert.pattern_state,
+                "key": alert.pattern_key,
+                "bias": alert.pattern_bias,
+                "signature": alert.pattern_signature,
+                "entry": alert.pattern_entry or {},
+                "target": alert.pattern_target,
+                "invalidation": alert.pattern_invalidation or {},
+                "end_time": (
+                    int(alert.pattern_end_time.timestamp()) if alert.pattern_end_time else None
+                ),
+            }
+            signals, state = pattern_evaluate(
+                bars,
+                best_pattern(detect_patterns(list(PATTERN_SCAN_KEYS), bars)),
+                state,
+                symbol=alert.symbol,
+                timeframe=alert.timeframe,
+                first_poll=alert.pattern_last_bar_time is None,
+            )
+            events = [
+                TriggerEvent.objects.create(
+                    alert=alert,
+                    symbol=alert.symbol,
+                    title=_pattern_event_title(alert, signal, state),
+                    message=_pattern_alert_message(alert, signal, state),
+                    observed_value=signal["close"],
+                )
+                for signal in signals
+            ]
+            alert.pattern_state = state["state"]
+            alert.pattern_key = state["key"]
+            alert.pattern_bias = state["bias"]
+            alert.pattern_signature = state["signature"]
+            alert.pattern_entry = state["entry"]
+            alert.pattern_target = state["target"]
+            alert.pattern_invalidation = state["invalidation"]
+            alert.pattern_end_time = (
+                _pattern_close_time(state["end_time"]) if state["end_time"] else None
+            )
+            alert.pattern_last_bar_time = bar_time
+            alert.last_observed_value = bars[-1]["close"]
             if events:
                 alert.last_triggered_at = now
                 fired.extend(events)
+            # A once alert has said everything it can about this formation once the pair is
+            # complete; an every alert stays live and waits for the next shape to form.
+            completed = any(signal["event"] == "breakout" for signal in signals)
+            finished = completed and alert.frequency == Alert.Frequency.ONCE
+            if finished:
+                alert.active = False
             alert.save(update_fields=[
-                "last_triggered_at", "last_observed_value", "last_rsi_value",
-                "last_bar_open_time", "prediction_a_state", "prediction_a_last_bar_time",
-                "prediction_a_direction", "prediction_a_level", "prediction_a_score",
-                "prediction_a_high_confluence", "updated_at",
-            ])
+                "pattern_state", "pattern_key", "pattern_bias", "pattern_signature",
+                "pattern_entry", "pattern_target", "pattern_invalidation",
+                "pattern_end_time", "pattern_last_bar_time", "last_observed_value",
+                "last_triggered_at", "updated_at",
+            ] + (["active"] if finished else []))
 
     for event in fired:
         _notify(event, configuration)
