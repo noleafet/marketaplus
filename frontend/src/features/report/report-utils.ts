@@ -2,7 +2,6 @@ import { intervalSeconds } from "@/lib/market/constants";
 import type { Timeframe } from "@/types/market";
 
 const intervalByMinutes: Record<number, Timeframe> = {
-  1: "1m",
   5: "5m",
   15: "15m",
   60: "1h",

@@ -1398,7 +1398,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
 
   useEffect(() => {
     if (quote === null) return;
-    const seconds = { "1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800 }[timeframe];
+    const seconds = { "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800 }[timeframe];
     const previous = bars[Math.max(0, bars.length - Math.ceil(86400 / seconds))]?.close;
     if (previous) setChange((quote - previous) / previous * 100);
   }, [quote, bars, timeframe]);

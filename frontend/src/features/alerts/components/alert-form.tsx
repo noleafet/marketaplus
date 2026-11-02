@@ -96,7 +96,7 @@ export default function AlertForm({ model, onSubmit }: Props) {
           MACD cross
         </button>
         <button className={kind === "pattern" ? "selected" : ""} onClick={() => onKindChange("pattern")}>
-          Chart pattern
+          Pattern forming
         </button>
       </div>
       <form onSubmit={onSubmit} className="alert-form">
@@ -359,13 +359,6 @@ export default function AlertForm({ model, onSubmit }: Props) {
                 </select>
               </label>
             </div>
-            <p className="config-hint">
-              The backend watches the last 50 candles for head and shoulders, double tops and
-              bottoms, triangles and wedges. It tells you when a shape is still forming, with the
-              entry, invalidation and target it pinned, and again when a completed candle closes
-              through that entry at the same target. A shape already finished when the alert is
-              created arms silently instead of replaying it.
-            </p>
             <div className="macd-summary" aria-live="polite">
               <b>This alert will</b>
               <p>{patternSummary}</p>

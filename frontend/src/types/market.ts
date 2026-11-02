@@ -1,10 +1,10 @@
 import type { UTCTimestamp } from "lightweight-charts";
 
 /** Intervals supported by both exchanges and the alert engine. */
-export const intervals = ["1m", "5m", "15m", "1h", "4h", "1d", "1w"] as const;
+export const intervals = ["5m", "15m", "1h", "4h", "1d", "1w"] as const;
 export type Timeframe = (typeof intervals)[number];
 /** The chart deliberately omits 1m: candles are refreshed on a 60-second cadence. */
-export const chartIntervals: readonly Timeframe[] = intervals.filter((interval) => interval !== "1m");
+export const chartIntervals: readonly Timeframe[] = intervals;
 
 export type Exchange = "binance" | "bybit";
 

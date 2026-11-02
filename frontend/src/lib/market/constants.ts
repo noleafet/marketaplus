@@ -13,7 +13,6 @@ export const exchangeName: Record<Exchange, string> = {
 
 /** Bybit v5 takes minutes as a string, and days/weeks as single letters. */
 export const bybitIntervals: Record<Timeframe, string> = {
-  "1m": "1",
   "5m": "5",
   "15m": "15",
   "1h": "60",
@@ -23,7 +22,6 @@ export const bybitIntervals: Record<Timeframe, string> = {
 };
 
 export const intervalSeconds: Record<Timeframe, number> = {
-  "1m": 60,
   "5m": 300,
   "15m": 900,
   "1h": 3600,
