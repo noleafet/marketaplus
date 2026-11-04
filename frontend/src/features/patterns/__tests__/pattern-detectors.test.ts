@@ -215,7 +215,7 @@ describe("triangles and wedges", () => {
 
   it("confirms a rising wedge to the downside and names the break level", () => {
     const bars = anchorsAt(
-      [[0, 98], [5, 100], [10, 104], [15, 103], [20, 106], [25, 105.2], [30, 108], [34, 105]],
+      [[0, 98], [5, 100], [10, 104], [15, 103], [20, 106], [25, 105.6], [30, 108], [34, 105]],
       35,
     );
     const match = only("rising_wedge", bars);
@@ -342,7 +342,7 @@ describe("entry level", () => {
 
   it("enters a resolved wedge once at the side that broke", () => {
     const bars = anchorsAt(
-      [[0, 98], [5, 100], [10, 104], [15, 103], [20, 106], [25, 105.2], [30, 108], [34, 105]],
+      [[0, 98], [5, 100], [10, 104], [15, 103], [20, 106], [25, 105.6], [30, 108], [34, 105]],
       35,
     );
     const match = only("rising_wedge", bars);
@@ -351,5 +351,54 @@ describe("entry level", () => {
     expect(entries).toHaveLength(1);
     expectLevel(entries[0]);
     expect(entries[0].from.price).toBeCloseTo(triggerPrice(match.entry), 10);
+  });
+});
+
+describe("measured targets (parity with the backend engine)", () => {
+  // Target lines can run outside the visible range and be clipped, so read the quoted number.
+  const target = (match: PatternMatch) => Number(/target ([\d,.]+)/.exec(match.summary)![1].replace(/,/g, ""));
+
+  it("measures a double top from its higher top, not a line extrapolated through both", () => {
+    const bars = anchorsAt([[0, 98], [10, 110], [16, 100], [22, 111], [32, 95], [39, 95]], 40);
+    // 111.25 - 99.75 = 11.5 below the neckline.
+    expect(target(only("double_top", bars))).toBeCloseTo(88.25, 10);
+  });
+
+  it("projects a head and shoulders target from the neckline where it is quoted", () => {
+    const forming = only("head_and_shoulders", anchorsAt(
+      [[0, 102], [8, 105], [14, 100], [20, 112], [30, 101], [34, 104]], 35,
+    ));
+    expect(target(forming)).toBeCloseTo(88.875, 10);
+    const broken = only("head_and_shoulders", anchorsAt(
+      [[0, 98], [8, 105], [14, 100], [20, 112], [26, 101], [32, 105], [45, 97], [49, 97]], 50,
+    ));
+    expect(target(broken)).toBeCloseTo(89.75, 10);
+    expect(broken.summary).toContain("neckline 101.75");
+  });
+
+  it("measures triangles and wedges from their first touch", () => {
+    const ascending = only("ascending_triangle", anchorsAt(
+      [[0, 101], [5, 99], [10, 110], [15, 102], [20, 110], [25, 105], [30, 110], [35, 109], [39, 109]], 40,
+    ));
+    expect(target(ascending)).toBeCloseTo(121.75, 10);
+    const wedge = only("rising_wedge", anchorsAt(
+      [[0, 98], [5, 100], [10, 104], [15, 103], [20, 106], [25, 105.6], [30, 108], [34, 105]], 35,
+    ));
+    expect(target(wedge)).toBeCloseTo(104.37, 10);
+    expect(wedge.summary).toContain("broke below 107.17");
+  });
+
+  it("keeps an unresolved symmetrical triangle neutral", () => {
+    const match = only("symmetrical_triangle", anchorsAt(
+      [[0, 105], [5, 100], [10, 110], [15, 101], [20, 109], [25, 102], [30, 108], [35, 105], [39, 105]], 40,
+    ));
+    expect(match.forming).toBe(true);
+    expect(match.bias).toBe("neutral");
+  });
+
+  it("keeps a swing when two neighbouring bars print the same extreme", () => {
+    const bars = anchorsAt([[0, 98], [10, 110], [16, 100], [22, 110], [30, 96], [34, 96]], 35);
+    bars[17] = { ...bars[17], low: bars[16].low };
+    expect(target(only("double_top", bars))).toBeCloseTo(89.25, 10);
   });
 });

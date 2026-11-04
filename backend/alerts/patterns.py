@@ -38,7 +38,7 @@ PATTERN_BIAS = {
     "double_bottom": "bullish",
     "ascending_triangle": "bullish",
     "descending_triangle": "bearish",
-    "symmetrical_triangle": "bullish",
+    "symmetrical_triangle": "neutral",
     "rising_wedge": "bearish",
     "falling_wedge": "bullish",
 }
@@ -83,18 +83,30 @@ def _price_range(bars):
 
 
 def _swing_pivots(bars, half_window):
-    """A bar whose high, or low, rules its whole window on both sides."""
+    """A bar whose high, or low, rules its whole window on both sides.
+
+    Bars printing the same extreme side by side are one swing, placed on the first of them, but
+    only once strictly weaker bars have closed the run on both sides: an exact tie must not erase
+    the swing, and a run still going at the newest bar has not turned yet.
+    """
     swings = []
-    for index in range(half_window, len(bars) - half_window):
-        is_peak = True
-        is_trough = True
+    count = len(bars)
+
+    def rules(index, field, better):
+        value = bars[index][field]
         for offset in range(1, half_window + 1):
-            if (bars[index - offset]["high"] >= bars[index]["high"]
-                    or bars[index + offset]["high"] >= bars[index]["high"]):
-                is_peak = False
-            if (bars[index - offset]["low"] <= bars[index]["low"]
-                    or bars[index + offset]["low"] <= bars[index]["low"]):
-                is_trough = False
+            if not better(value, bars[index - offset][field]):
+                return False
+        run_end = index
+        while run_end + 1 < count and bars[run_end + 1][field] == value:
+            run_end += 1
+        if run_end + half_window >= count:
+            return False
+        return all(better(value, bars[run_end + offset][field]) for offset in range(1, half_window + 1))
+
+    for index in range(half_window, count - half_window):
+        is_peak = rules(index, "high", lambda value, other: value > other)
+        is_trough = rules(index, "low", lambda value, other: value < other)
         pivot = None
         if is_peak:
             pivot = {"index": index, "price": bars[index]["high"], "kind": "peak"}
@@ -361,21 +373,19 @@ def _describe_three_swing(key, bars, group):
             end_index=end_index, break_index=break_index, levels=[],
             invalidation=invalidation, summary=summary,
         )
-    neck_end = neckline.at(edge)
     height = (head["price"] - neckline.at(head["index"])) if bearish \
         else (neckline.at(head["index"]) - head["price"])
-    target = neck_end - height if bearish else neck_end + height
     side = "down" if bearish else "up"
+    slope = neckline.slope
+    # The measured move starts where the neckline is broken: the break bar once confirmed, the
+    # latest bar while forming. Projecting from the drawing edge would let a sloped neckline drag
+    # the target along as new candles arrive.
+    price = neckline.at(len(bars) - 1) if forming else neckline.at(break_index)
+    target = price - height if bearish else price + height
     if forming:
-        # The line runs on to the projection edge, but the level that confirms the shape today
-        # is the neckline at the latest bar; a sloping neckline otherwise quotes a future price.
-        price = neckline.at(len(bars) - 1)
-        slope = neckline.slope
         summary += f" · break {break_word} {_price_text(price)} · target {_price_text(target)}"
     else:
-        price = neckline.at(break_index)
-        slope = neckline.slope
-        summary += f" · neckline {_price_text(neck_end)} · target {_price_text(target)}"
+        summary += f" · neckline {_price_text(price)} · target {_price_text(target)}"
     return _match(
         key, bars, forming=forming, stage=stage, span_bars=span_bars,
         end_index=end_index, break_index=break_index,
@@ -497,7 +507,9 @@ def _describe_double_swing(key, bars, group):
     if stage == "awaiting_break":
         summary += " · awaiting neckline break"
     if level_line is not None:
-        height = abs(level_line.at(edge) - neckline.at(edge))
+        # Measured move: the outer extreme to the reaction level, not a line extrapolated
+        # through both extremes, which would grow with any difference between them.
+        height = abs(failure_level - middle["price"])
         target = neckline.at(edge) - height if bearish else neckline.at(edge) + height
         break_word = "below" if bearish else "above"
         if forming:
@@ -555,7 +567,10 @@ def _find_convergence(bars, swings, kind):
         lower = _trend_fit([{"index": p["index"], "price": p["price"]} for p in lows])
         if upper is None or lower is None:
             continue
-        width_start = upper.at(from_index) - lower.at(from_index)
+        # The shape starts at its first touch; measuring the lines further back, where nothing
+        # touches them, would only make the opening look wider than price ever traded.
+        first_pivot = min(pivot["index"] for pivot in highs + lows)
+        width_start = upper.at(first_pivot) - lower.at(first_pivot)
         width_end = upper.at(last) - lower.at(last)
         if width_start < 0.03 * span or width_end < 0.02 * span:
             continue
@@ -566,15 +581,13 @@ def _find_convergence(bars, swings, kind):
         fit_tolerance = min(0.12 * span, 0.35 * width_start)
         if not _line_fits(highs, upper, fit_tolerance) or not _line_fits(lows, lower, fit_tolerance):
             continue
-        upper_drift = upper.at(last) - upper.at(from_index)
-        lower_drift = lower.at(last) - lower.at(from_index)
+        upper_drift = upper.at(last) - upper.at(first_pivot)
+        lower_drift = lower.at(last) - lower.at(first_pivot)
         if not _matches_convergence(kind, upper_drift, lower_drift, width_start):
             continue
-        score = (1 - width_end / width_start) * 0.7 + ((last - from_index) / 150) * 0.3
+        score = (1 - width_end / width_start) * 0.7 + ((last - first_pivot) / 150) * 0.3
         if best is not None and score <= best["score"]:
             continue
-        up_target = upper.at(last) + width_start
-        down_target = lower.at(last) - width_start
         # The channel edges are already drawn, so the break level needs no line of its own; a
         # small overshoot past the edge is noise rather than the breakout that resolves the shape.
         slack = 0.05 * span
@@ -594,6 +607,11 @@ def _find_convergence(bars, swings, kind):
                 broke_down = True
                 if break_index is None:
                     break_index = index
+        # The measured move is the opening width, added from the edge where price leaves the
+        # shape: the break bar once it has, the latest bar while still inside.
+        anchor = last if break_index is None else break_index
+        up_target = upper.at(anchor) + width_start
+        down_target = lower.at(anchor) - width_start
         # Ascending triangles and falling wedges resolve upward, the other two downward.
         upside = kind in {"ascending", "falling"}
         resolution = None
@@ -618,8 +636,9 @@ def _find_convergence(bars, swings, kind):
         # Once the break has happened there is nothing left to wait for at a future bar.
         price = line.at(break_index) if resolution else line.at(last)
         target = up_target if above else down_target
-        if kind == "symmetrical" and resolution:
-            bias = "bullish" if resolution == "up" else "bearish"
+        if kind == "symmetrical":
+            # Until price leaves the channel the shape has not picked a direction.
+            bias = ("bullish" if resolution == "up" else "bearish") if resolution else "neutral"
         else:
             bias = PATTERN_BIAS[key]
         if kind == "symmetrical" and forming:
@@ -640,7 +659,7 @@ def _find_convergence(bars, swings, kind):
         width_percent = int((1 - width_end / width_start) * 100 + 0.5)
         # A symmetrical shape projects both measured moves; the others have one side.
         targets = [up_target, down_target] if kind == "symmetrical" else [target]
-        summary = f"{PATTERN_LABELS[key]} over {last - from_index} bars closing {width_percent}%"
+        summary = f"{PATTERN_LABELS[key]} over {last - first_pivot} bars closing {width_percent}%"
         if forming:
             if kind == "symmetrical":
                 summary += (" · break outside "
@@ -650,12 +669,12 @@ def _find_convergence(bars, swings, kind):
         else:
             edge_line = upper if resolution == "up" else lower
             summary += (f" · broke {'above' if resolution == 'up' else 'below'} "
-                        f"{_price_text(edge_line.at(last))}")
+                        f"{_price_text(edge_line.at(break_index))}")
         summary += " · target " + " / ".join(_price_text(item) for item in targets)
         match = _match(
             key, bars, forming=forming,
             stage="awaiting_break" if forming else "broke",
-            span_bars=last - from_index, end_index=last_swing,
+            span_bars=last - first_pivot, end_index=last_swing,
             break_index=break_index, levels=levels, invalidation=invalidation,
             summary=summary, bias=bias,
         )
@@ -802,10 +821,19 @@ def _pin(state, match, *, symbol, timeframe, last_time):
         "bias": match["bias"],
         "signature": _formation_signature(symbol, timeframe, match),
         "end_time": match["end_time"],
-        "entry": _pinned(level, last_time),
+        "entry": {**_pinned(level, last_time),
+                  # The neckline only confirms a shape whose last swing has printed.
+                  "needs_swing": match.get("stage") == "missing_swing"},
         "target": level["target"],
         "invalidation": _pinned_invalidation(match["invalidation"], last_time),
     })
+
+
+def _swing_completed(bars, key):
+    """Whether the shape pinned while a swing was missing now reads with that swing printed."""
+    if not key:
+        return False
+    return any(match["stage"] != "missing_swing" for match in detect_patterns([key], bars))
 
 
 def pattern_evaluate(bars, match, state, *, symbol, timeframe, first_poll=False):
@@ -832,6 +860,10 @@ def pattern_evaluate(bars, match, state, *, symbol, timeframe, first_poll=False)
             bars, anchor_time=entry["anchor_time"], price=entry["price"],
             slope=entry["slope"], side=entry["side"],
         )
+        if broke is not None and entry.get("needs_swing") and not _swing_completed(bars, state["key"]):
+            # The neckline gave way before the second top or right shoulder printed: the
+            # shape failed rather than broke out, so it is dropped without an alert.
+            return [], {**state, "state": "idle", "entry": {}, "invalidation": {}, "target": None}
         if broke is not None:
             # The target survives the transition because the entry event repeats it; a shape
             # that fails instead has nothing left to aim at.

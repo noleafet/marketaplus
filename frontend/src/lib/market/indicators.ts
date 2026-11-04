@@ -45,7 +45,7 @@ export function rsi(values: number[], period = 14): (number | null)[] {
 /** Wilder's ATR; true range includes gaps from the previous close, not just the bar's own range. */
 export function atr(bars: Bar[], period = 14): (number | null)[] {
   const result: (number | null)[] = Array(bars.length).fill(null);
-  if (bars.length <= period) return result;
+  if (bars.length < period) return result;
   const trueRanges = bars.map((bar, index) => {
     const previous = index > 0 ? bars[index - 1].close : bar.open;
     return Math.max(

@@ -363,8 +363,6 @@ export default function AlertDashboard() {
         collapsed={sidebarCollapsed}
         mobileOpen={mobileNavOpen}
         activeSection={activeSection}
-        activeAlerts={activeCount}
-        triggers={events.length}
         onNavigate={() => setMobileNavOpen(false)}
         onCloseMobile={() => setMobileNavOpen(false)}
         onToggleCollapsed={toggleSidebar}

@@ -60,8 +60,8 @@ export default function PatternGuide({ onClose }: { onClose: () => void }) {
                 <div className="candle-guide-body">
                   <header>
                     <h3>{choice.label}</h3>
-                    <span className={`guide-reading ${choice.bias}`}>
-                      {choice.bias === "bullish" ? "Bullish" : "Bearish"}
+                    <span className={`guide-reading ${choice.bias === "neutral" ? "both" : choice.bias}`}>
+                      {choice.bias === "neutral" ? "Either way" : choice.bias === "bullish" ? "Bullish" : "Bearish"}
                     </span>
                   </header>
                   <dl>

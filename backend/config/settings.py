@@ -106,10 +106,10 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 SPECTACULAR_SETTINGS = {
-    "TITLE": "TradeChartAlerts API",
+    "TITLE": "Marketa+ API",
     "DESCRIPTION": (
         "Market data, alerting, Telegram and engine-control endpoints for the "
-        "TradeChartAlerts dashboard.\n\n"
+        "Marketa+ dashboard.\n\n"
         "Interactive docs: `/api/docs/` (Swagger UI) and `/api/redoc/`. "
         "The machine-readable schema is served at `/api/schema/`."
     ),

@@ -2,6 +2,12 @@
 import { CANDLE_PANE_TOP, type Palette } from "@/lib/market/constants";
 import type { PatternMatch, PatternPoint } from "./pattern-analysis";
 
+/** Green for bullish, red for bearish, and blue for a shape that has not picked a side. */
+function biasColor(match: PatternMatch, colors: Palette) {
+  if (match.bias === "neutral") return colors.blue;
+  return match.bias === "bullish" ? colors.green : colors.red;
+}
+
 /** Small caption on a pill so labels stay readable on top of any background. */
 function paintPatternLabel(
   context: CanvasRenderingContext2D,
@@ -44,7 +50,7 @@ export function paintPattern(
   scale: number,
   colors: Palette,
 ) {
-  const accent = match.bias === "bullish" ? colors.green : colors.red;
+  const accent = biasColor(match, colors);
   // "projection" is a swing that has not printed yet and "trigger" is the level that confirms it,
   // so both are drawn fainter than real geometry to keep the finished shape legible.
   // The entry shares the accent with the measured target but stays solid, so the two never read
@@ -157,7 +163,7 @@ export function paintPatternCaption(
   colors: Palette,
 ) {
   const text = matchName(match);
-  const accent = match.bias === "bullish" ? colors.green : colors.red;
+  const accent = biasColor(match, colors);
   context.save();
   context.font = `600 ${Math.round(10 * scale)}px "Geist", system-ui, sans-serif`;
   const width = context.measureText(text).width + 14 * scale;

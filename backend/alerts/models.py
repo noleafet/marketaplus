@@ -222,7 +222,7 @@ class Alert(models.Model):
         help_text="Internal state: last completed bar evaluated by the pattern monitor",
     )
 
-    # Optional line-based price alert, preserving the drawing alert semantics of TradeChartAlert.
+    # Optional line-based price alert, preserving the drawing alert semantics of the chart.
     line_type = models.CharField(max_length=8, choices=LineType.choices, blank=True, default="")
     line_t1 = models.DateTimeField(null=True, blank=True)
     line_price1 = models.DecimalField(max_digits=30, decimal_places=12, null=True, blank=True)

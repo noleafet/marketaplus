@@ -79,12 +79,14 @@ export default function TradeCalculator({
       : null;
   const stop = rawStop !== null && rawStop > 0 ? rawStop : null;
   const risk = stop === null ? null : Math.abs(entryValue - stop);
-  const target =
+  const rawTarget =
     risk === null || !hasRewardRatio
       ? null
       : isLong
         ? entryValue + risk * rewardRatio
         : entryValue - risk * rewardRatio;
+  // A short target at or below zero is unreachable, so it is not quoted.
+  const target = rawTarget !== null && rawTarget > 0 ? rawTarget : null;
   const stopPercent = stop === null ? null : ((stop - entryValue) / entryValue) * 100;
   const targetPercent =
     target === null ? null : ((target - entryValue) / entryValue) * 100;

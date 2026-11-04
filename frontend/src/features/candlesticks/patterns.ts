@@ -323,7 +323,8 @@ function hammer(bars: readonly CandleBar[], end: number) {
   const bar = bars[end];
   const range = span(bar);
   const size = body(bar);
-  if (!fallingInto(bars, end) || bar.close < bar.open) return false;
+  // Either body colour counts: the long lower wick is the rejection.
+  if (!fallingInto(bars, end)) return false;
   // The real body has to stay small and sit in the upper part of the range.
   if (size > range * 0.45) return false;
   if (lowerWick(bar) < Math.max(size * 2, range * 0.45)) return false;
@@ -335,7 +336,7 @@ function shootingStar(bars: readonly CandleBar[], end: number) {
   const bar = bars[end];
   const range = span(bar);
   const size = body(bar);
-  if (!risingInto(bars, end) || bar.close > bar.open) return false;
+  if (!risingInto(bars, end)) return false;
   // Mirror of the hammer: a small body low in the range with a long upper wick.
   if (size > range * 0.45) return false;
   if (upperWick(bar) < Math.max(size * 2, range * 0.45)) return false;

@@ -7,7 +7,6 @@ import {
   LuActivity,
   LuBell,
   LuChartLine,
-  LuFileText,
   LuPanelLeftClose,
   LuPenTool,
   LuPlus,
@@ -27,8 +26,6 @@ type Props = {
   collapsed: boolean;
   mobileOpen: boolean;
   activeSection: string;
-  activeAlerts: number;
-  triggers: number;
   onNavigate: () => void;
   onCloseMobile: () => void;
   onToggleCollapsed: () => void;
@@ -43,7 +40,6 @@ const workspaceNav: NavItem[] = [
 ];
 
 const toolsNav: NavItem[] = [
-  { title: "Alert report", href: "/report", icon: LuFileText },
   { title: "API docs", href: `${API}/docs/`, icon: LuBookOpen, external: true },
   { title: "API health", href: `${API}/health/`, icon: LuServer, external: true },
 ];
@@ -83,8 +79,6 @@ function NavLink({
 function SidebarBody({
   collapsed,
   activeSection,
-  activeAlerts,
-  triggers,
   onNavigate,
   onToggleCollapsed,
 }: Omit<Props, "mobileOpen" | "onCloseMobile">) {
@@ -159,33 +153,12 @@ function SidebarBody({
       </nav>
 
       <div className="border-t border-sidebar-border p-2">
-        <a
-          href={`${API}/health/`}
-          target="_blank"
-          rel="noreferrer"
-          title={collapsed ? "API status" : undefined}
-          className={cn(
-            "flex items-center gap-3 rounded-lg border border-sidebar-border bg-card px-3 py-2.5 text-xs shadow-sm transition-colors hover:bg-sidebar-accent",
-            collapsed && "justify-center px-0",
-          )}
-        >
-          <span className="relative flex size-2 shrink-0">
-            <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500/60" />
-            <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
-          </span>
-          <span className={cn("min-w-0 flex-1", collapsed && "hidden")}>
-            <span className="block font-medium leading-tight">API status</span>
-            <span className="block truncate text-[11px] leading-tight text-muted-foreground">
-              {activeAlerts} active · {triggers} triggers
-            </span>
-          </span>
-        </a>
         <button
           type="button"
           onClick={onToggleCollapsed}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           className={cn(
-            "mt-1 flex h-8 w-full items-center gap-3 rounded-md px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+            "flex h-8 w-full items-center gap-3 rounded-md px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
             collapsed && "justify-center px-0",
           )}
         >

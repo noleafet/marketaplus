@@ -26,7 +26,7 @@ const bybitOpenInterestIntervals: Partial<Record<Timeframe, string>> = {
   "15m": "15min",
   "1h": "1h",
   "4h": "4h",
-  "1d": "24h",
+  "1d": "1d",
 };
 
 async function readJson<T>(response: Response): Promise<T | null> {

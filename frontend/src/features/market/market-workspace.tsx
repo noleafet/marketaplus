@@ -1951,10 +1951,15 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
       const deltaTime = point.time - drag.start.time; const deltaPrice = point.price - drag.start.price;
       // A plain horizontal line is pinned in time; a calculator zone moves as a whole box.
       const movesTime = original.type !== "hline" || original.origin === "calculator";
-      next = { ...original, t1: movesTime ? original.t1 + deltaTime : original.t1, p1: original.p1 + deltaPrice };
+      // Zones may not slide below zero, so the entry follows the same clamped shift to stay attached.
+      const shift = original.zones?.length
+        ? Math.max(deltaPrice, -Math.min(...original.zones.map((zone) => zone.low)))
+        : deltaPrice;
+      next = { ...original, t1: movesTime ? original.t1 + deltaTime : original.t1, p1: original.p1 + shift };
+      // A calculator box carries an end time without a second price; it moves with the box.
+      if (!hasSecond && original.t2 !== undefined && movesTime) next.t2 = original.t2 + deltaTime;
       if (original.zones?.length) {
         // Keep the stop/target boxes attached to the entry when the setup is dragged vertically.
-        const shift = Math.max(deltaPrice, -Math.min(...original.zones.map((zone) => zone.low)));
         next.zones = original.zones.map((zone) => ({
           ...zone,
           low: Math.max(0, zone.low + shift),

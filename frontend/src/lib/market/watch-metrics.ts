@@ -2,6 +2,7 @@ import type {
   Bar, OpenInterestPoint, Timeframe, WatchMetrics, WatchReading,
 } from "@/types/market";
 import { closedBars } from "./candles";
+import { intervalSeconds } from "./constants";
 import { ema, macdValues, rsi } from "./indicators";
 
 /** A reading that could not be measured, and therefore has no change either. */
@@ -62,10 +63,11 @@ export function watchMetrics(
   const emaValues = ema(closes, 100);
   const histogram = macdValues(closes).histogram;
   // Open interest comes from a separate futures endpoint, so match it to the candle timestamps
-  // instead of assuming both series line up by index.
+  // instead of assuming both series line up by index. Each point is a snapshot taken at its
+  // timestamp, so the reading for a closed candle is the one stamped at that candle's close.
   const openInterestByTime = new Map(openInterest.map((point) => [point.time, point.value]));
-  const lastClosedTime = Number(closed[lastClosed].time);
-  const previousClosedTime = Number(closed[previousClosed].time);
+  const lastClosedTime = Number(closed[lastClosed].time) + intervalSeconds[timeframe];
+  const previousClosedTime = Number(closed[previousClosed].time) + intervalSeconds[timeframe];
 
   return {
     vol: reading(volumeRatio(closed, lastClosed), volumeRatio(closed, previousClosed)),

@@ -21,7 +21,7 @@ export type PatternKey =
 
 export type PatternBar = { time: number; open: number; high: number; low: number; close: number };
 
-export type PatternChoice = { value: PatternKey; label: string; bias: "bullish" | "bearish" };
+export type PatternChoice = { value: PatternKey; label: string; bias: "bullish" | "bearish" | "neutral" };
 
 export const patternChoices: PatternChoice[] = [
   { value: "head_and_shoulders", label: "Head and Shoulders", bias: "bearish" },
@@ -32,7 +32,7 @@ export const patternChoices: PatternChoice[] = [
   { value: "bear_flag", label: "Bear Flag", bias: "bearish" },
   { value: "ascending_triangle", label: "Ascending Triangle", bias: "bullish" },
   { value: "descending_triangle", label: "Descending Triangle", bias: "bearish" },
-  { value: "symmetrical_triangle", label: "Symmetrical Triangle", bias: "bullish" },
+  { value: "symmetrical_triangle", label: "Symmetrical Triangle", bias: "neutral" },
   { value: "rising_wedge", label: "Rising Wedge", bias: "bearish" },
   { value: "falling_wedge", label: "Falling Wedge", bias: "bullish" },
 ];
@@ -49,7 +49,8 @@ export type PatternLabel = PatternPoint & { text: string };
 export type PatternMatch = {
   key: PatternKey;
   label: string;
-  bias: "bullish" | "bearish";
+  /** Neutral only for a symmetrical triangle that has not left its channel yet. */
+  bias: "bullish" | "bearish" | "neutral";
   segments: PatternSegment[];
   markers: PatternMarker[];
   labels: PatternLabel[];
@@ -131,7 +132,12 @@ function priceRange(bars: PatternBar[]): PriceRange {
   return { low, high, span: Math.max(high - low, Number.EPSILON) };
 }
 
-/** A swing is a bar whose high, or low, rules its whole window on both sides. */
+/**
+ * A swing is a bar whose high, or low, rules its whole window on both sides. Bars printing the
+ * same extreme side by side are one swing, placed on the first of them, but only once strictly
+ * weaker bars have closed the run on both sides: an exact tie must not erase the swing, and a
+ * run still going at the newest bar has not turned yet.
+ */
 function swingPivots(bars: PatternBar[], halfWindow: number): Pivot[] {
   const swings: Pivot[] = [];
   const keep = (pivot: Pivot) => {
@@ -144,13 +150,22 @@ function swingPivots(bars: PatternBar[], halfWindow: number): Pivot[] {
     }
     swings.push(pivot);
   };
-  for (let index = halfWindow; index < bars.length - halfWindow; index += 1) {
-    let isPeak = true;
-    let isTrough = true;
+  const rules = (index: number, field: "high" | "low", better: (value: number, other: number) => boolean) => {
+    const value = bars[index][field];
     for (let offset = 1; offset <= halfWindow; offset += 1) {
-      if (bars[index - offset].high >= bars[index].high || bars[index + offset].high >= bars[index].high) isPeak = false;
-      if (bars[index - offset].low <= bars[index].low || bars[index + offset].low <= bars[index].low) isTrough = false;
+      if (!better(value, bars[index - offset][field])) return false;
     }
+    let runEnd = index;
+    while (runEnd + 1 < bars.length && bars[runEnd + 1][field] === value) runEnd += 1;
+    if (runEnd + halfWindow >= bars.length) return false;
+    for (let offset = 1; offset <= halfWindow; offset += 1) {
+      if (!better(value, bars[runEnd + offset][field])) return false;
+    }
+    return true;
+  };
+  for (let index = halfWindow; index < bars.length - halfWindow; index += 1) {
+    const isPeak = rules(index, "high", (value, other) => value > other);
+    const isTrough = rules(index, "low", (value, other) => value < other);
     if (isPeak) keep({ index, price: bars[index].high, kind: "peak" });
     else if (isTrough) keep({ index, price: bars[index].low, kind: "trough" });
   }
@@ -383,7 +398,10 @@ function buildThreeSwing(key: PatternKey, bars: PatternBar[], found: ThreeSwing)
     // While the shape is partial this line is the break level rather than just a boundary.
     segments.push({ from: { time: timeAt(bars, left.index), price: neckStart }, to: { time: timeAt(bars, edge), price: neckEnd }, role: forming ? "trigger" : "boundary" });
     const height = bearish ? head.price - neckline.at(head.index) : neckline.at(head.index) - head.price;
-    const target = neckEnd + (bearish ? -height : height);
+    // The measured move starts where the neckline is broken: the break bar once confirmed, the
+    // newest bar while forming. The drawing edge would drag the target along a sloped neckline.
+    const anchorPrice = neckline.at(!forming && breakIndex !== null ? breakIndex : bars.length - 1);
+    const target = anchorPrice + (bearish ? -height : height);
     segments.push({ from: { time: timeAt(bars, left.index), price: target }, to: { time: timeAt(bars, edge), price: target }, role: "target" });
     labels.push({ time: timeAt(bars, neck2.index), price: neck2.price, text: "Neckline" }, { time: timeAt(bars, edge), price: target, text: "Target" });
     if (forming) {
@@ -397,7 +415,7 @@ function buildThreeSwing(key: PatternKey, bars: PatternBar[], found: ThreeSwing)
       labels.push(level.label);
       summary = `${summary} · break ${breakWord} ${priceText(neckNow)} · target ${priceText(target)}`;
     } else {
-      summary = `${choice.label} over ${span} bars · neckline ${priceText(neckEnd)} · target ${priceText(target)}`;
+      summary = `${choice.label} over ${span} bars · neckline ${priceText(anchorPrice)} · target ${priceText(target)}`;
       const breakPrice = breakIndex !== null ? neckline.at(breakIndex) : null;
       entry = breakIndex !== null && breakPrice !== null
         ? `Neckline broke ${breakWord} ${priceText(breakPrice)}.`
@@ -519,7 +537,8 @@ function buildDoubleSwing(key: PatternKey, bars: PatternBar[], found: DoubleSwin
     ? Math.max(first.price, second?.price ?? first.price)
     : Math.min(first.price, second?.price ?? first.price);
   const invalidation = `Close ${bearish ? "above" : "below"} ${priceText(failureLevel)} invalidates both ${bearish ? "tops" : "bottoms"}.`;
-  const height = level ? Math.abs(level.at(edge) - neckline.at(edge)) : 0;
+  // Measured move: the outer extreme to the reaction level, not a line extrapolated through both.
+  const height = level ? Math.abs(failureLevel - middle.price) : 0;
   if (level) {
     segments.push({ from: { time: timeAt(bars, first.index), price: level.at(first.index) }, to: { time: timeAt(bars, edge), price: level.at(edge) }, role: "boundary" });
     // While the second top is missing, the reaction level is the break that confirms the shape.
@@ -662,7 +681,10 @@ function findConvergence(bars: PatternBar[], swings: Pivot[], kind: "ascending" 
     const upper = trendFit(highs.map((pivot) => ({ index: pivot.index, price: pivot.price })));
     const lower = trendFit(lows.map((pivot) => ({ index: pivot.index, price: pivot.price })));
     if (!upper || !lower) continue;
-    const widthStart = upper.at(from) - lower.at(from);
+    // The shape starts at its first touch; measuring the lines further back, where nothing
+    // touches them, would only make the opening look wider than price ever traded.
+    const firstPivot = Math.min(...highs.map((pivot) => pivot.index), ...lows.map((pivot) => pivot.index));
+    const widthStart = upper.at(firstPivot) - lower.at(firstPivot);
     const widthEnd = upper.at(last) - lower.at(last);
     if (widthStart < 0.03 * range.span || widthEnd < 0.02 * range.span) continue;
     if (widthEnd > 0.8 * widthStart) continue;
@@ -671,16 +693,14 @@ function findConvergence(bars: PatternBar[], swings: Pivot[], kind: "ascending" 
     // tolerance follows the channel rather than the whole history around it.
     const fitTolerance = Math.min(0.12 * range.span, 0.35 * widthStart);
     if (!lineFits(highs, upper, fitTolerance) || !lineFits(lows, lower, fitTolerance)) continue;
-    const upperDrift = upper.at(last) - upper.at(from);
-    const lowerDrift = lower.at(last) - lower.at(from);
+    const upperDrift = upper.at(last) - upper.at(firstPivot);
+    const lowerDrift = lower.at(last) - lower.at(firstPivot);
     if (!matchesConvergence(kind, upperDrift, lowerDrift, widthStart)) continue;
-    const score = (1 - widthEnd / widthStart) * 0.7 + ((last - from) / 150) * 0.3;
+    const score = (1 - widthEnd / widthStart) * 0.7 + ((last - firstPivot) / 150) * 0.3;
     if (best && score <= best.score) continue;
-    const upTarget = upper.at(last) + widthStart;
-    const downTarget = lower.at(last) - widthStart;
     const segments: PatternSegment[] = [
-      { from: { time: timeAt(bars, from), price: upper.at(from) }, to: { time: timeAt(bars, last + PROJECTION_BARS), price: upper.at(last + PROJECTION_BARS) }, role: "boundary" },
-      { from: { time: timeAt(bars, from), price: lower.at(from) }, to: { time: timeAt(bars, last + PROJECTION_BARS), price: lower.at(last + PROJECTION_BARS) }, role: "boundary" },
+      { from: { time: timeAt(bars, firstPivot), price: upper.at(firstPivot) }, to: { time: timeAt(bars, last + PROJECTION_BARS), price: upper.at(last + PROJECTION_BARS) }, role: "boundary" },
+      { from: { time: timeAt(bars, firstPivot), price: lower.at(firstPivot) }, to: { time: timeAt(bars, last + PROJECTION_BARS), price: lower.at(last + PROJECTION_BARS) }, role: "boundary" },
     ];
     const labels: PatternLabel[] = [
       { time: timeAt(bars, last + PROJECTION_BARS), price: upper.at(last + PROJECTION_BARS), text: "Resistance" },
@@ -706,6 +726,11 @@ function findConvergence(bars: PatternBar[], swings: Pivot[], kind: "ascending" 
         if (breakIndex === null) breakIndex = index;
       }
     }
+    // The measured move is the opening width, added from the edge where price leaves the shape:
+    // the break bar once it has, the newest bar while still inside.
+    const anchor = breakIndex ?? last;
+    const upTarget = upper.at(anchor) + widthStart;
+    const downTarget = lower.at(anchor) - widthStart;
     // Ascending triangles and falling wedges resolve upward, the other two downward.
     const upside = kind === "ascending" || kind === "falling";
     let resolution: "up" | "down" | null = null;
@@ -727,22 +752,23 @@ function findConvergence(bars: PatternBar[], swings: Pivot[], kind: "ascending" 
     const trigger = !forming ? undefined : kind === "symmetrical"
       ? `Close outside ${priceText(lower.at(last))}–${priceText(upper.at(last))} to confirm.`
       : `Close ${breakWord} ${priceText(level)} to confirm.`;
-    let summary = `${choice.label} over ${last - from} bars closing ${Math.round((1 - widthEnd / widthStart) * 100)}%`;
+    let summary = `${choice.label} over ${last - firstPivot} bars closing ${Math.round((1 - widthEnd / widthStart) * 100)}%`;
     summary += forming
       ? ` · break ${kind === "symmetrical" ? `outside ${priceText(lower.at(last))}–${priceText(upper.at(last))}` : `${breakWord} ${priceText(level)}`}`
-      : ` · broke ${resolution === "up" ? "above" : "below"} ${priceText(resolution === "up" ? upper.at(last) : lower.at(last))}`;
+      : ` · broke ${resolution === "up" ? "above" : "below"} ${priceText(resolution === "up" ? upper.at(anchor) : lower.at(anchor))}`;
     // A symmetrical triangle can go either way, so both measured moves are projected.
     const targets: { price: number; text: string }[] = kind === "symmetrical"
       ? [{ price: upTarget, text: "Target up" }, { price: downTarget, text: "Target down" }]
       : [{ price: upside ? upTarget : downTarget, text: "Target" }];
     for (const item of targets) {
-      segments.push({ from: { time: timeAt(bars, from), price: item.price }, to: { time: timeAt(bars, last + PROJECTION_BARS), price: item.price }, role: "target" });
+      segments.push({ from: { time: timeAt(bars, firstPivot), price: item.price }, to: { time: timeAt(bars, last + PROJECTION_BARS), price: item.price }, role: "target" });
       labels.push({ time: timeAt(bars, last + PROJECTION_BARS), price: item.price, text: item.text });
     }
     summary += ` · target ${targets.map((item) => priceText(item.price)).join(" / ")}`;
-    // A symmetrical triangle inherits its direction from the side that actually broke.
-    const bias = kind === "symmetrical" && resolution
-      ? resolution === "up" ? "bullish" : "bearish"
+    // A symmetrical triangle inherits its direction from the side that actually broke, and has
+    // none until then.
+    const bias: PatternMatch["bias"] = kind === "symmetrical"
+      ? resolution ? (resolution === "up" ? "bullish" : "bearish") : "neutral"
       : choice.bias;
     const entry = forming
       ? trigger

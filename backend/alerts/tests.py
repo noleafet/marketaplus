@@ -184,8 +184,23 @@ class MacdApproachTests(TestCase):
             _macd_approach_thresholds(-0.09, -0.04, 9, 4, Alert.Condition.CROSS_UP, 10),
             ([5], 5),
         )
+        # A wobble that widens the gap keeps the bands already reported...
         self.assertEqual(
             _macd_approach_thresholds(-0.04, -0.06, 4, 6, Alert.Condition.CROSS_UP, 5),
+            ([], 5),
+        )
+        self.assertEqual(
+            _macd_approach_thresholds(-0.06, -0.045, 6, 4.5, Alert.Condition.CROSS_UP, 5),
+            ([], 5),
+        )
+        # ...until the lines drift well clear of every band, which re-arms them.
+        self.assertEqual(
+            _macd_approach_thresholds(-0.06, -0.2, 6, 20, Alert.Condition.CROSS_UP, 5),
+            ([], None),
+        )
+        # A cross always starts the next approach fresh.
+        self.assertEqual(
+            _macd_approach_thresholds(-0.04, 0.02, 4, 2, Alert.Condition.CROSS_UP, 5),
             ([], None),
         )
 
@@ -1470,7 +1485,7 @@ class OpenApiSchemaTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.content.decode()
-        self.assertIn("TradeChartAlerts API", body)
+        self.assertIn("Marketa+ API", body)
         self.assertIn("/api/engine/run/", body)
         self.assertIn("/api/telegram/find-chat/", body)
 
@@ -1573,7 +1588,8 @@ class PatternEngineParityTests(SimpleTestCase):
         self.assertTrue(match["forming"])
         self.assertAlmostEqual(level["price"], 101.0, places=10)
         self.assertAlmostEqual(level["slope"], 0.0625, places=10)
-        self.assertAlmostEqual(level["target"], 89.25, places=10)
+        # Height 112.25 - 100.125 (neckline at the head), measured from the quoted 101.
+        self.assertAlmostEqual(level["target"], 88.875, places=10)
 
     def test_a_broken_sloped_neckline_names_the_break_bar_level(self):
         bars = pattern_anchors(
@@ -1586,7 +1602,8 @@ class PatternEngineParityTests(SimpleTestCase):
         self.assertEqual(match["break_time"], pattern_time(38))
         self.assertAlmostEqual(level["price"], 101.75, places=10)
         self.assertAlmostEqual(level["slope"], 1 / 12, places=10)
-        self.assertAlmostEqual(level["target"], 91.16666666666667, places=6)
+        # Height 112.25 - 100.25, measured from the break-bar neckline, not the drawing edge.
+        self.assertAlmostEqual(level["target"], 89.75, places=6)
 
     def test_inverse_head_and_shoulders_breaks_above_the_neckline(self):
         bars = pattern_anchors(
@@ -1678,7 +1695,8 @@ class PatternEngineParityTests(SimpleTestCase):
         level = pattern_level(match, "up")
         self.assertAlmostEqual(level["price"], 110.25, places=10)
         self.assertAlmostEqual(level["slope"], 0.0, places=10)
-        self.assertAlmostEqual(level["target"], 122.65, places=10)
+        # Opening width at the first touch (bar 5): 110.25 - 98.75 = 11.5.
+        self.assertAlmostEqual(level["target"], 121.75, places=10)
         self.assertEqual(match["invalidation"]["side"], "below")
         self.assertAlmostEqual(match["invalidation"]["price"], 108.95, places=10)
         self.assertAlmostEqual(match["invalidation"]["slope"], 0.3, places=10)
@@ -1694,7 +1712,8 @@ class PatternEngineParityTests(SimpleTestCase):
         self.assertEqual(match["bias"], "bearish")
         level = pattern_level(match, "down")
         self.assertAlmostEqual(level["price"], 99.75, places=10)
-        self.assertAlmostEqual(level["target"], 86.85, places=10)
+        # Opening width at the first touch (bar 5): 111.75 - 99.75 = 12.
+        self.assertAlmostEqual(level["target"], 87.75, places=10)
         self.assertEqual(match["invalidation"]["side"], "above")
         self.assertAlmostEqual(match["invalidation"]["price"], 101.55, places=10)
         self.assertAlmostEqual(match["invalidation"]["slope"], -0.3, places=10)
@@ -1712,26 +1731,29 @@ class PatternEngineParityTests(SimpleTestCase):
         up, down = match["levels"]
         self.assertAlmostEqual(up["price"], 107.35, places=10)
         self.assertAlmostEqual(up["slope"], -0.1, places=10)
-        self.assertAlmostEqual(up["target"], 118.95, places=10)
+        # Opening width at the first touch (bar 5): 110.75 - 99.75 = 11.
+        self.assertAlmostEqual(up["target"], 118.35, places=10)
         self.assertEqual(up["bias"], "bullish")
         self.assertAlmostEqual(down["price"], 103.15, places=10)
         self.assertAlmostEqual(down["slope"], 0.1, places=10)
-        self.assertAlmostEqual(down["target"], 91.55, places=10)
+        self.assertAlmostEqual(down["target"], 92.15, places=10)
         self.assertEqual(down["bias"], "bearish")
 
     def test_rising_wedge_resolves_downward(self):
         bars = pattern_anchors(
-            [[0, 98], [5, 100], [10, 104], [15, 103], [20, 106], [25, 105.2],
+            [[0, 98], [5, 100], [10, 104], [15, 103], [20, 106], [25, 105.6],
              [30, 108], [34, 105]], 35,
         )
         match = only_pattern(["rising_wedge"], bars)
 
         self.assertFalse(match["forming"])
         self.assertEqual(match["bias"], "bearish")
-        self.assertEqual(match["break_time"], pattern_time(33))
+        self.assertEqual(match["break_time"], pattern_time(32))
         level = pattern_level(match, "down")
-        self.assertAlmostEqual(level["price"], 106.71, places=10)
-        self.assertAlmostEqual(level["target"], 104.17, places=6)
+        # Support through 102.75@15 and 105.35@25, read on the break bar.
+        self.assertAlmostEqual(level["price"], 107.17, places=10)
+        # Opening width at the first touch (bar 10): 104.25 - 101.45 = 2.8.
+        self.assertAlmostEqual(level["target"], 104.37, places=6)
         self.assertEqual(match["invalidation"]["side"], "above")
         self.assertAlmostEqual(match["invalidation"]["price"], 109.05, places=10)
 
@@ -2049,3 +2071,126 @@ class PatternAlertApiTests(TestCase):
         self.assertEqual(row["pattern_key"], "head_and_shoulders")
         self.assertEqual(row["pattern_bias"], "bearish")
         self.assertAlmostEqual(row["pattern_target"], 87.25)
+
+
+class ReviewRegressionTests(TestCase):
+    """Accuracy fixes from the November 2026 logic review."""
+
+    @patch("alerts.services._trend_signal", return_value=None)
+    @patch("alerts.services._rsi_signal")
+    @patch("alerts.services._macd_signal", return_value=None)
+    def test_rsi_cross_alert_fires_without_a_single_level(self, _macd, rsi_signal, _trend):
+        # Admin-created RSI "cross" alerts used to crash the whole poll building their title.
+        alert = Alert.objects.create(
+            symbol="BTCUSDT", kind=Alert.Kind.RSI, condition=Alert.Condition.CROSS,
+            timeframe="1h", frequency=Alert.Frequency.EVERY, last_rsi_value=25,
+        )
+        later = Alert.objects.create(
+            symbol="ETHUSDT", kind=Alert.Kind.RSI, condition=Alert.Condition.ABOVE,
+            timeframe="1h", frequency=Alert.Frequency.EVERY,
+        )
+        bar_time = timezone.now() - timedelta(minutes=1)
+        rsi_signal.side_effect = lambda symbol, *_args: {
+            "bar_time": bar_time, "rsi": 35 if symbol == "BTCUSDT" else 80, "close": 100,
+        }
+
+        check_alerts()
+
+        self.assertEqual(TriggerEvent.objects.get(alert=alert).title, "BTCUSDT RSI 1h crosses either way 30/70")
+        self.assertTrue(TriggerEvent.objects.filter(alert=later).exists())
+
+    def test_rsi_level_of_zero_is_honoured(self):
+        alert = Alert(rsi_oversold=0, rsi_overbought=100)
+        from .services import _rsi_classification
+        self.assertEqual(_rsi_classification(alert, {"rsi": 25}), "bearish-balanced")
+
+    def test_resuming_an_alert_clears_stale_cross_state(self):
+        alert = Alert.objects.create(
+            symbol="BTCUSDT", kind=Alert.Kind.MACD, condition=Alert.Condition.CROSS,
+            timeframe="1h", active=False, last_macd_diff=-5,
+            last_bar_open_time=timezone.now() - timedelta(days=30),
+        )
+        user = get_user_model().objects.create_user("reviewer", password="x")
+        client = APIClient()
+        client.force_authenticate(user)
+
+        response = client.patch(f"/api/alerts/{alert.id}/", {"active": True}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        alert.refresh_from_db()
+        self.assertIsNone(alert.last_macd_diff)
+        self.assertIsNone(alert.last_bar_open_time)
+
+    def test_events_still_running_are_kept(self):
+        now = timezone.now()
+        event = {
+            "id": 7, "title": "Week-long conference",
+            "dateEvent": (now - timedelta(days=2)).strftime("%Y-%m-%dT00:00:00Z"),
+            "dateEventTo": (now + timedelta(days=3)).strftime("%Y-%m-%dT00:00:00Z"),
+            "coins": 5, "categories": "bad",  # Malformed lists are ignored, not fatal.
+        }
+        self.assertEqual(store_events("BTCUSDT", "bitcoin", [event]), 1)
+        purge_market_events(symbols=["BTCUSDT"])
+        self.assertTrue(MarketEvent.objects.filter(symbol="BTCUSDT", external_id="7").exists())
+
+    @patch("alerts.events.resolve_coin_slug", return_value="bitcoin")
+    @patch("alerts.events.fetch_coin_events")
+    def test_sync_drops_upcoming_events_the_source_no_longer_lists(self, scrape_events, _resolve):
+        WatchlistSymbol.objects.get_or_create(symbol="BTCUSDT")
+        future = (timezone.now() + timedelta(days=10)).strftime("%Y-%m-%dT00:00:00Z")
+        scrape_events.return_value = [{"id": 1, "title": "Old", "dateEvent": future}]
+        sync_market_events(symbols=["BTCUSDT"])
+        scrape_events.return_value = [{"id": 2, "title": "Reissued", "dateEvent": future}]
+
+        sync_market_events(symbols=["BTCUSDT"])
+
+        ids = set(MarketEvent.objects.filter(symbol="BTCUSDT").values_list("external_id", flat=True))
+        self.assertEqual(ids, {"2"})
+
+
+class PatternGeometryReviewTests(SimpleTestCase):
+    """Measured moves and swing rules from the November 2026 logic review; the chart spec pins
+    the same numbers."""
+
+    def test_double_top_is_measured_from_its_higher_top(self):
+        bars = pattern_anchors([[0, 98], [10, 110], [16, 100], [22, 111], [32, 95], [39, 95]], 40)
+        match = only_pattern(["double_top"], bars)
+        # 111.25 - 99.75 = 11.5 below the neckline, not a line extrapolated through both tops.
+        self.assertAlmostEqual(pattern_level(match, "down")["target"], 88.25, places=10)
+
+    def test_equal_neighbouring_lows_still_make_one_swing(self):
+        bars = pattern_anchors([[0, 98], [10, 110], [16, 100], [22, 110], [30, 96], [34, 96]], 35)
+        bars[17] = {**bars[17], "low": bars[16]["low"]}
+        match = only_pattern(["double_top"], bars)
+        self.assertAlmostEqual(pattern_level(match, "down")["target"], 89.25, places=10)
+
+    def test_an_unresolved_symmetrical_triangle_is_neutral(self):
+        bars = pattern_anchors(
+            [[0, 105], [5, 100], [10, 110], [15, 101], [20, 109], [25, 102],
+             [30, 108], [35, 105], [39, 105]], 40,
+        )
+        match = only_pattern(["symmetrical_triangle"], bars)
+        self.assertTrue(match["forming"])
+        self.assertEqual(match["bias"], "neutral")
+
+    def test_a_neckline_close_before_the_second_top_is_a_failure_not_a_breakout(self):
+        forming_bars = pattern_anchors([[0, 92], [12, 96], [20, 100], [28, 90], [32, 95]], 33)
+        match = only_pattern(["double_top"], forming_bars)
+        self.assertEqual(match["stage"], "missing_swing")
+        signals, state = pattern_evaluate(
+            forming_bars, match, None, symbol="BTCUSDT", timeframe="1h",
+        )
+        self.assertEqual([signal["event"] for signal in signals], ["forming"])
+
+        # Price slides through the reaction low without ever printing a second top.
+        slid = pattern_anchors([[0, 92], [12, 96], [20, 100], [28, 90], [32, 95], [40, 84]], 41)
+        self.assertFalse(any(
+            found["stage"] != "missing_swing" for found in detect_patterns(["double_top"], slid)
+        ))
+        signals, state = pattern_evaluate(
+            slid, best_pattern(detect_patterns(list(DETECTED_PATTERN_KEYS), slid)), state,
+            symbol="BTCUSDT", timeframe="1h",
+        )
+        self.assertEqual(signals, [])
+        self.assertEqual(state["state"], "idle")
+        self.assertIsNone(state["target"])

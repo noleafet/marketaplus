@@ -137,7 +137,7 @@ export default function TradeReport({ token, interval, time, exchange: exchangeP
   const timeframe = useMemo(() => parseReportInterval(interval), [interval]);
   const barTime = useMemo(() => parseReportTime(time), [time]);
   const symbol = token.trim().toUpperCase();
-  const reportSubject = subject?.trim() || `${symbol || "Market"}(${timeframe}) MACD Crossed`;
+  const reportSubject = subject?.trim() || `${symbol || "Market"}(${timeframe}) report`;
 
   const [exchange, setExchange] = useState<Exchange | null>(exchangeValue(exchangeParam));
   const [exchangeNote, setExchangeNote] = useState("");

@@ -41,7 +41,11 @@ describe("watchMetrics", () => {
     const { bars, closed, lastClosedTime, previousClosedTime } = scenario();
     const metrics = watchMetrics(
       bars,
-      [{ time: lastClosedTime, value: 500 }, { time: previousClosedTime, value: 400 }],
+      // Each open-interest point is a snapshot, so a candle's reading is the one taken at its close.
+      [
+        { time: (lastClosedTime + HOUR) as UTCTimestamp, value: 500 },
+        { time: (previousClosedTime + HOUR) as UTCTimestamp, value: 400 },
+      ],
       "1h",
       NOW,
     );
@@ -64,7 +68,7 @@ describe("watchMetrics", () => {
     expect(metrics.macd.value).toBe(expected);
     expect(metrics.macd.change).not.toBeNull();
 
-    // Open interest is matched by candle timestamp, not by array position.
+    // Open interest is matched by close timestamp, not by array position.
     expect(metrics.oi.value).toBe(500);
     expect(metrics.oi.change).toBeCloseTo(25, 10);
   });

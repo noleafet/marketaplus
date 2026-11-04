@@ -15,8 +15,8 @@ const intervalByMinutes: Record<number, Timeframe> = {
 export function parseReportInterval(raw: string | undefined): Timeframe {
   const value = (raw ?? "").trim().toLowerCase();
   if (!value) return "1h";
-  if (value === "d" || value === "1d") return "1d";
-  if (value === "w" || value === "1w") return "1w";
+  if (value === "d" || value === "1d" || value === "1440") return "1d";
+  if (value === "w" || value === "1w" || value === "10080") return "1w";
 
   const hourMatch = /^(\d+)h$/.exec(value);
   if (hourMatch) return intervalByMinutes[Number(hourMatch[1]) * 60] ?? "1h";
@@ -40,6 +40,12 @@ export function parseReportTime(raw: string | undefined): number | null {
     /* Already decoded. */
   }
   value = value.replace(" ", "T");
+
+  // A hand-written ISO link with an explicit zone is honoured as written.
+  if (/^\d{4}-\d{1,2}-\d{1,2}T\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)) {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return Math.floor(parsed / 1000);
+  }
 
   const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})T(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(value);
   if (iso) {

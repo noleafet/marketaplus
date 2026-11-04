@@ -162,6 +162,25 @@ class AlertSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"kind": "RSI alerts are only available as a confirmation option for MACD alerts. Create a MACD alert and enable its RSI context."})
         return attrs
 
+    # Changing what an alert watches, or waking it after a pause, makes its stored readings
+    # stale: comparing them with fresh ones would report a cross that never happened.
+    REARM_FIELDS = ("symbol", "kind", "condition", "timeframe", "rsi_timeframe", "rsi_period")
+    STATE_FIELDS = (
+        "last_observed_value", "last_bar_open_time", "last_macd_diff", "last_macd_gap_percent",
+        "last_macd_warning_threshold", "last_rsi_value",
+    )
+
+    def update(self, instance, validated_data):
+        resumed = validated_data.get("active") is True and not instance.active
+        retargeted = any(
+            field in validated_data and validated_data[field] != getattr(instance, field)
+            for field in self.REARM_FIELDS
+        )
+        if resumed or retargeted:
+            for field in self.STATE_FIELDS:
+                setattr(instance, field, None)
+        return super().update(instance, validated_data)
+
 
 class TriggerEventSerializer(serializers.ModelSerializer):
     alert_id = serializers.IntegerField(read_only=True)

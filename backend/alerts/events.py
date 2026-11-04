@@ -16,6 +16,7 @@ import re
 import threading
 
 import requests
+from django.db.models import Q
 from django.utils import timezone
 
 from .models import MarketEvent, WatchlistSymbol
@@ -382,7 +383,10 @@ def fetch_coin_events(slug):
             if not isinstance(event, dict):
                 continue
             event_date = _parse_datetime(event.get("dateEvent"))
-            if event_date is None or event_date < today:
+            if event_date is None:
+                continue
+            # A multi-day event that started earlier is still live until its end date.
+            if (_parse_datetime(event.get("dateEventTo")) or event_date) < today:
                 continue
             external_id = str(event.get("id") or "").strip()
             if external_id:
@@ -400,17 +404,20 @@ def store_events(symbol, slug, events):
         external_id = str(event.get("id") or "").strip()
         title = str(event.get("title") or "").strip()
         event_date = _parse_datetime(event.get("dateEvent"))
-        if not external_id or not title or event_date is None or event_date < today:
+        event_end = _parse_datetime(event.get("dateEventTo"))
+        if not external_id or not title or event_date is None or (event_end or event_date) < today:
             continue
         impact, impact_score = normalize_impact(event.get("impactScore"))
         coin_symbol = ""
-        for coin in event.get("coins") or []:
+        coins = event.get("coins")
+        for coin in coins if isinstance(coins, list) else []:
             if isinstance(coin, dict) and str(coin.get("id") or "").strip() == slug:
                 coin_symbol = str(coin.get("symbol") or "").strip().lower()
                 break
+        raw_categories = event.get("categories")
         categories = [
             str(category.get("name") or "").strip()
-            for category in event.get("categories") or []
+            for category in (raw_categories if isinstance(raw_categories, list) else [])
             if isinstance(category, dict) and str(category.get("name") or "").strip()
         ]
         source_url = str(event.get("link") or "").strip()
@@ -427,7 +434,7 @@ def store_events(symbol, slug, events):
             "title": title[:240],
             "description": str(event.get("description") or "")[:4000],
             "date": event_date,
-            "date_end": _parse_datetime(event.get("dateEventTo")),
+            "date_end": event_end,
             "displayed_date": str(event.get("dateEventDisplayed") or "")[:80],
             "impact": impact,
             "impact_score": impact_score,
@@ -448,7 +455,10 @@ def purge_market_events(symbols=None):
     queryset = MarketEvent.objects.all()
     if symbols is not None:
         queryset = queryset.filter(symbol__in=list(symbols))
-    past = queryset.filter(date__lt=_utc_today())
+    today = _utc_today()
+    past = queryset.filter(
+        Q(date_end__isnull=True, date__lt=today) | Q(date_end__lt=today)
+    )
     past_count = past.count()
     past.delete()
     removed_unknown_symbols = 0
@@ -505,7 +515,19 @@ def sync_market_events(*, symbols=None, stdout=None):
             logger.warning("Market event scrape failed for %s: %s", entry.symbol, exc)
             write(f"{entry.symbol}: {exc}")
             continue
-        stored = store_events(entry.symbol, entry.slug, events)
+        try:
+            stored = store_events(entry.symbol, entry.slug, events)
+            # The scrape is the full upcoming calendar for this coin, so rows it no longer
+            # lists were cancelled or re-issued under a new id.
+            scraped_ids = [str(event.get("id") or "").strip() for event in events if isinstance(event, dict)]
+            MarketEvent.objects.filter(symbol=entry.symbol, date__gte=_utc_today()).exclude(
+                external_id__in=scraped_ids,
+            ).delete()
+        except Exception as exc:  # One malformed payload must not stop the other coins.
+            failed.append(entry.symbol)
+            logger.exception("Market event store failed for %s", entry.symbol)
+            write(f"{entry.symbol}: {exc}")
+            continue
         upcoming_count += stored
         synced += 1
         write(f"{entry.symbol}: {stored} upcoming event(s) from {page_url}.")

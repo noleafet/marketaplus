@@ -239,9 +239,9 @@ def _trend_signal(symbol, timeframe, exchange, period=100):
 def _rsi_classification(alert, rsi):
     """Classify RSI momentum as bullish or bearish, adding a balanced qualifier near the middle. Informational only."""
     value = rsi["rsi"]
-    if value >= (alert.rsi_overbought or 70):
+    if value >= (70 if alert.rsi_overbought is None else alert.rsi_overbought):
         return "bullish"
-    if value <= (alert.rsi_oversold or 30):
+    if value <= (30 if alert.rsi_oversold is None else alert.rsi_oversold):
         return "bearish"
     return "bullish-balanced" if value >= 50 else "bearish-balanced"
 
@@ -360,12 +360,20 @@ def _crossed(condition, previous, current):
     return up or down
 
 
+MACD_APPROACH_REARM_PERCENT = 15
+
+
 def _macd_approach_thresholds(previous, current, previous_gap_percent, current_gap_percent, condition, previous_threshold):
     """Return newly reached proximity bands and the current approach state."""
     if previous is None or current == 0 or previous_gap_percent is None or current_gap_percent is None:
         return [], None
-    if previous * current <= 0 or current_gap_percent >= previous_gap_percent:
+    if previous * current <= 0:
+        # The lines crossed, so the next approach starts fresh.
         return [], None
+    if current_gap_percent >= previous_gap_percent:
+        # A widening bar keeps the bands already reported, so a wobble around a band does not
+        # repeat its warning. Drifting well clear of every band re-arms them.
+        return [], (None if current_gap_percent > MACD_APPROACH_REARM_PERCENT else previous_threshold)
     if (current < 0 and condition == Alert.Condition.CROSS_DOWN) or (
         current > 0 and condition == Alert.Condition.CROSS_UP
     ):
@@ -492,7 +500,8 @@ def check_alerts(*, stdout=None):
     """Fetch current market values, persist alert state/events, and notify on hits."""
     configuration = AppConfiguration.load()
     exchange = Exchange.load()
-    alerts = list(Alert.objects.filter(active=True).order_by("id"))
+    # Pattern alerts run on their own scheduler job (check_pattern_alerts).
+    alerts = list(Alert.objects.filter(active=True).exclude(kind=Alert.Kind.PATTERN).order_by("id"))
     price_symbols = {a.symbol for a in alerts if a.kind == Alert.Kind.PRICE}
     macd_keys = {(a.symbol, a.timeframe) for a in alerts if a.kind == Alert.Kind.MACD}
     # MACD alerts always report RSI and the EMA trend in their message, even when the
@@ -544,138 +553,146 @@ def check_alerts(*, stdout=None):
             continue
         if snapshot.kind == Alert.Kind.MACD and macd is None:
             continue
-        with transaction.atomic():
-            alert = Alert.objects.select_for_update().filter(pk=snapshot.pk, active=True).first()
-            if alert is None:
-                continue
-            event = None
-            if alert.kind == Alert.Kind.PRICE:
-                level = _line_level(alert, now.timestamp())
-                if level is None:
+        alert_fired = []
+        try:
+            with transaction.atomic():
+                alert = Alert.objects.select_for_update().filter(pk=snapshot.pk, active=True).first()
+                if alert is None:
                     continue
-                previous_diff = None if alert.last_observed_value is None else alert.last_observed_value - level
-                current_diff = value - level
-                hit = (
-                    value >= level if alert.condition == Alert.Condition.ABOVE else
-                    value <= level if alert.condition == Alert.Condition.BELOW else
-                    _crossed(alert.condition, previous_diff, current_diff)
-                )
-                alert.last_observed_value = value
-                if hit and _may_fire(alert, now):
-                    direction = alert.get_condition_display().lower()
-                    event = TriggerEvent.objects.create(
-                        alert=alert,
-                        symbol=alert.symbol,
-                        title=f"{alert.symbol} {direction} {level:g}",
-                        message=f"Last price {value:g}; target {level:g}" + (f" — {alert.note}" if alert.note else ""),
-                        observed_value=value,
+                event = None
+                if alert.kind == Alert.Kind.PRICE:
+                    level = _line_level(alert, now.timestamp())
+                    if level is None:
+                        continue
+                    previous_diff = None if alert.last_observed_value is None else alert.last_observed_value - level
+                    current_diff = value - level
+                    hit = (
+                        value >= level if alert.condition == Alert.Condition.ABOVE else
+                        value <= level if alert.condition == Alert.Condition.BELOW else
+                        _crossed(alert.condition, previous_diff, current_diff)
                     )
-            elif alert.kind == Alert.Kind.MACD:
-                bar_time = macd["bar_time"]
-                if alert.last_bar_open_time is None:
-                    # Arm at the latest closed candle; never report an old cross on first startup.
-                    alert.last_bar_open_time = bar_time
-                    alert.last_macd_diff = macd["current_diff"]
-                    atr = macd.get("atr")
-                    alert.last_macd_gap_percent = abs(macd["current_diff"]) / atr * 100 if atr and atr > 0 else None
-                elif bar_time > alert.last_bar_open_time:
-                    previous_diff = alert.last_macd_diff
-                    if previous_diff is None:
-                        previous_diff = macd["previous_diff"]
-                    current_diff = macd["current_diff"]
-                    atr = macd.get("atr")
-                    current_gap_percent = abs(current_diff) / atr * 100 if atr and atr > 0 else None
-                    previous_gap_percent = alert.last_macd_gap_percent
-                    if previous_gap_percent is None and previous_diff is not None and atr and atr > 0:
-                        previous_gap_percent = abs(previous_diff) / atr * 100
-                    hit = _crossed(alert.condition, previous_diff, current_diff)
-                    alert.last_bar_open_time = bar_time
-                    alert.last_observed_value = macd["close"]
-                    thresholds, warning_state = _macd_approach_thresholds(
-                        previous_diff, current_diff, previous_gap_percent, current_gap_percent, alert.condition,
-                        alert.last_macd_warning_threshold,
-                    )
-                    alert.last_macd_warning_threshold = warning_state
-                    alert.last_macd_diff = current_diff
-                    alert.last_macd_gap_percent = current_gap_percent
-                    # Filter thresholds based on enabled flags
-                    enabled_thresholds = []
-                    if alert.macd_threshold_5 and 5 in thresholds:
-                        enabled_thresholds.append(5)
-                    if alert.macd_threshold_10 and 10 in thresholds:
-                        enabled_thresholds.append(10)
-                    for threshold in enabled_thresholds:
-                        status = "bullish" if current_diff < 0 else "bearish"
-                        title = f"{alert.symbol}({alert.timeframe}) MACD {threshold}% Approach"
-                        fired.append(TriggerEvent.objects.create(
-                            alert=alert,
-                            symbol=alert.symbol,
-                            title=title,
-                            message=_macd_alert_message(
-                                alert, macd, status=status, rsi=rsi, trend=trend,
-                                distance=current_gap_percent, subject=title,
-                            ),
-                            observed_value=macd["close"],
-                        ))
+                    alert.last_observed_value = value
                     if hit and _may_fire(alert, now):
-                        status = "bullish" if macd["current_diff"] > 0 else "bearish"
-                        title = f"{alert.symbol}({alert.timeframe}) MACD Crossed"
+                        direction = alert.get_condition_display().lower()
                         event = TriggerEvent.objects.create(
                             alert=alert,
                             symbol=alert.symbol,
-                            title=title,
-                            message=_macd_alert_message(
-                                alert, macd, status=status, rsi=rsi, trend=trend, subject=title,
-                            ),
-                            observed_value=macd["close"],
+                            title=f"{alert.symbol} {direction} {level:g}",
+                            message=f"Last price {value:g}; target {level:g}" + (f" — {alert.note}" if alert.note else ""),
+                            observed_value=value,
                         )
-            elif alert.kind == Alert.Kind.RSI:
-                bar_time = rsi["bar_time"]
-                rsi_value = rsi["rsi"]
-                rsi_oversold = alert.rsi_oversold or 30
-                rsi_overbought = alert.rsi_overbought or 70
-                previous_rsi = alert.last_rsi_value
-                hit = False
-                level = None
+                elif alert.kind == Alert.Kind.MACD:
+                    bar_time = macd["bar_time"]
+                    if alert.last_bar_open_time is None:
+                        # Arm at the latest closed candle; never report an old cross on first startup.
+                        alert.last_bar_open_time = bar_time
+                        alert.last_macd_diff = macd["current_diff"]
+                        atr = macd.get("atr")
+                        alert.last_macd_gap_percent = abs(macd["current_diff"]) / atr * 100 if atr and atr > 0 else None
+                    elif bar_time > alert.last_bar_open_time:
+                        previous_diff = alert.last_macd_diff
+                        if previous_diff is None:
+                            previous_diff = macd["previous_diff"]
+                        current_diff = macd["current_diff"]
+                        atr = macd.get("atr")
+                        current_gap_percent = abs(current_diff) / atr * 100 if atr and atr > 0 else None
+                        previous_gap_percent = alert.last_macd_gap_percent
+                        if previous_gap_percent is None and previous_diff is not None and atr and atr > 0:
+                            previous_gap_percent = abs(previous_diff) / atr * 100
+                        hit = _crossed(alert.condition, previous_diff, current_diff)
+                        alert.last_bar_open_time = bar_time
+                        alert.last_observed_value = macd["close"]
+                        thresholds, warning_state = _macd_approach_thresholds(
+                            previous_diff, current_diff, previous_gap_percent, current_gap_percent, alert.condition,
+                            alert.last_macd_warning_threshold,
+                        )
+                        alert.last_macd_warning_threshold = warning_state
+                        alert.last_macd_diff = current_diff
+                        alert.last_macd_gap_percent = current_gap_percent
+                        # Filter thresholds based on enabled flags
+                        enabled_thresholds = []
+                        if alert.macd_threshold_5 and 5 in thresholds:
+                            enabled_thresholds.append(5)
+                        if alert.macd_threshold_10 and 10 in thresholds:
+                            enabled_thresholds.append(10)
+                        for threshold in enabled_thresholds:
+                            status = "bullish" if current_diff < 0 else "bearish"
+                            title = f"{alert.symbol}({alert.timeframe}) MACD {threshold}% Approach"
+                            alert_fired.append(TriggerEvent.objects.create(
+                                alert=alert,
+                                symbol=alert.symbol,
+                                title=title,
+                                message=_macd_alert_message(
+                                    alert, macd, status=status, rsi=rsi, trend=trend,
+                                    distance=current_gap_percent, subject=title,
+                                ),
+                                observed_value=macd["close"],
+                            ))
+                        if hit and _may_fire(alert, now):
+                            status = "bullish" if macd["current_diff"] > 0 else "bearish"
+                            title = f"{alert.symbol}({alert.timeframe}) MACD Crossed"
+                            event = TriggerEvent.objects.create(
+                                alert=alert,
+                                symbol=alert.symbol,
+                                title=title,
+                                message=_macd_alert_message(
+                                    alert, macd, status=status, rsi=rsi, trend=trend, subject=title,
+                                ),
+                                observed_value=macd["close"],
+                            )
+                elif alert.kind == Alert.Kind.RSI:
+                    bar_time = rsi["bar_time"]
+                    rsi_value = rsi["rsi"]
+                    rsi_oversold = 30 if alert.rsi_oversold is None else alert.rsi_oversold
+                    rsi_overbought = 70 if alert.rsi_overbought is None else alert.rsi_overbought
+                    previous_rsi = alert.last_rsi_value
+                    hit = False
+                    level = None
 
-                if alert.condition == Alert.Condition.ABOVE:
-                    level = rsi_overbought
-                    hit = rsi_value >= level
-                elif alert.condition == Alert.Condition.BELOW:
-                    level = rsi_oversold
-                    hit = rsi_value <= level
-                elif alert.condition == Alert.Condition.CROSS_UP:
-                    level = rsi_overbought
-                    hit = previous_rsi is not None and previous_rsi < level <= rsi_value
-                elif alert.condition == Alert.Condition.CROSS_DOWN:
-                    level = rsi_oversold
-                    hit = previous_rsi is not None and previous_rsi > level >= rsi_value
-                elif alert.condition == Alert.Condition.CROSS:
-                    if previous_rsi is not None:
-                        hit = (previous_rsi < rsi_oversold <= rsi_value) or (previous_rsi > rsi_overbought >= rsi_value)
+                    if alert.condition == Alert.Condition.ABOVE:
+                        level = rsi_overbought
+                        hit = rsi_value >= level
+                    elif alert.condition == Alert.Condition.BELOW:
+                        level = rsi_oversold
+                        hit = rsi_value <= level
+                    elif alert.condition == Alert.Condition.CROSS_UP:
+                        level = rsi_overbought
+                        hit = previous_rsi is not None and previous_rsi < level <= rsi_value
+                    elif alert.condition == Alert.Condition.CROSS_DOWN:
+                        level = rsi_oversold
+                        hit = previous_rsi is not None and previous_rsi > level >= rsi_value
+                    elif alert.condition == Alert.Condition.CROSS:
+                        level = f"{rsi_oversold:g}/{rsi_overbought:g}"
+                        if previous_rsi is not None:
+                            hit = (previous_rsi < rsi_oversold <= rsi_value) or (previous_rsi > rsi_overbought >= rsi_value)
 
-                alert.last_rsi_value = rsi_value
-                alert.last_observed_value = rsi["close"]
+                    alert.last_rsi_value = rsi_value
+                    alert.last_observed_value = rsi["close"]
 
-                if hit and _may_fire(alert, now):
-                    direction = alert.get_condition_display().lower()
-                    event = TriggerEvent.objects.create(
-                        alert=alert,
-                        symbol=alert.symbol,
-                        title=f"{alert.symbol} RSI {alert.timeframe} {direction} {level:g}",
-                        message=f"RSI {rsi_value:.2f}, close {rsi['close']:g}" + (f" — {alert.note}" if alert.note else ""),
-                        observed_value=rsi["close"],
-                    )
-            if event is not None:
-                alert.last_triggered_at = now
-                if alert.frequency == Alert.Frequency.ONCE:
-                    alert.active = False
-                fired.append(event)
-            alert.save(update_fields=[
-                "active", "last_triggered_at", "last_observed_value", "last_bar_open_time",
-                "last_macd_diff", "last_macd_gap_percent", "last_macd_warning_threshold",
-                "last_rsi_value", "updated_at"
-            ])
+                    if hit and _may_fire(alert, now):
+                        direction = alert.get_condition_display().lower()
+                        event = TriggerEvent.objects.create(
+                            alert=alert,
+                            symbol=alert.symbol,
+                            title=f"{alert.symbol} RSI {alert.timeframe} {direction} {level if isinstance(level, str) else f'{level:g}'}",
+                            message=f"RSI {rsi_value:.2f}, close {rsi['close']:g}" + (f" — {alert.note}" if alert.note else ""),
+                            observed_value=rsi["close"],
+                        )
+                if event is not None:
+                    alert.last_triggered_at = now
+                    if alert.frequency == Alert.Frequency.ONCE:
+                        alert.active = False
+                    alert_fired.append(event)
+                alert.save(update_fields=[
+                    "active", "last_triggered_at", "last_observed_value", "last_bar_open_time",
+                    "last_macd_diff", "last_macd_gap_percent", "last_macd_warning_threshold",
+                    "last_rsi_value", "updated_at"
+                ])
+        except Exception:
+            # One broken alert must not stop the others or hold back their notifications.
+            logger.exception("Alert %s check failed", snapshot.pk)
+            continue
+        fired.extend(alert_fired)
 
     for event in fired:
         _notify(event, configuration)
@@ -733,7 +750,9 @@ def _pattern_alert_message(alert, signal, state):
         lines.append(f"Target: {_format_price(state['target'])}")
     if alert.note:
         lines.append(f"Note: {alert.note}")
-    lines.append(f"Report: {_report_url(alert, _pattern_close_time(signal['bar_time']))}")
+    lines.append(
+        f"Report: {_report_url(alert, _pattern_close_time(signal['bar_time']), subject=_pattern_event_title(alert, signal, state))}"
+    )
     return "\n".join(lines)
 
 
