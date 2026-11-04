@@ -31,7 +31,7 @@ const sizeStyles: Record<ButtonSize, string> = {
   icon: "h-9 w-9",
 };
 
-export function buttonVariants({
+function buttonVariants({
   variant = "default",
   size = "default",
   className,

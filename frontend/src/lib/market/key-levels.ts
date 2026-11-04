@@ -37,7 +37,7 @@ export type KeyLevels = {
   resistances: KeyLevel[];
 };
 
-export const KEY_LEVEL_WEIGHTS = {
+const KEY_LEVEL_WEIGHTS = {
   reactions: 30,
   rejection: 25,
   confluence: 20,

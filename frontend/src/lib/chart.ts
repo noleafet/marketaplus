@@ -57,7 +57,7 @@ export function drawingCoordinate(
  * the source's bar spacing instead would leave the narrower pane short of bars and slide its
  * left edge out of line with the candles above it.
  */
-export function copyWindow(from: IChartApi, to: IChartApi) {
+function copyWindow(from: IChartApi, to: IChartApi) {
   const source = from.timeScale();
   const target = to.timeScale();
   const range = source.getVisibleLogicalRange();

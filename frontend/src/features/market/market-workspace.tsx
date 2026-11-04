@@ -36,7 +36,7 @@ import {
   type PatternBar, type PatternMatch,
 } from "@/features/patterns/pattern-analysis";
 import { matchName, paintPattern, paintPatternCaption } from "@/features/patterns/paint-pattern";
-import { chartIntervals } from "@/types/market";
+import { intervals } from "@/types/market";
 import type {
   AnnotateTab, Bar, Drawing, DrawingZone, MarketEvent, MarketWorkspaceProps, PatternShot,
   Preferences, Tool, TradeEntryDrawing, WatchMetrics,
@@ -263,7 +263,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     // 1m was removed from the chart, so migrate a saved selection rather than loading an unreachable interval.
     setPreferences({
       ...restored,
-      timeframe: chartIntervals.includes(restored.timeframe) ? restored.timeframe : defaultPreferences.timeframe,
+      timeframe: intervals.includes(restored.timeframe) ? restored.timeframe : defaultPreferences.timeframe,
     });
     setDrawings(readSaved("tradechart.drawings", readSaved("cd.lines", [])));
   }, []);

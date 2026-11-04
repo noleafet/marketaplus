@@ -10,7 +10,6 @@ from .models import Alert, MarketEvent, PatternShot, TriggerEvent, WatchlistSymb
 TIMEFRAMES = {"1m", "5m", "15m", "1h", "4h", "1d", "1w"}
 PRICE_CONDITIONS = {"cross_up", "cross_down", "cross", "above", "below"}
 MACD_CONDITIONS = {"cross_up", "cross_down", "cross"}
-RSI_CONDITIONS = {"cross_up", "cross_down", "cross", "above", "below"}
 # Mirrors the pattern keys offered by the chart's pattern analysis.
 PATTERN_KEYS = {
     "head_and_shoulders", "inverse_head_and_shoulders", "double_top", "double_bottom",
@@ -41,14 +40,13 @@ class AlertSerializer(serializers.ModelSerializer):
             "line_type", "line_t1", "line_price1", "line_t2", "line_price2",
             "line_extend", "created_at", "updated_at", "last_triggered_at", "rsi_period",
             "rsi_oversold", "rsi_overbought", "last_rsi_value", "macd_threshold_5",
-            "macd_threshold_10", "rsi_enabled", "macd_triggered", "trend_enabled",
+            "macd_threshold_10", "rsi_enabled", "trend_enabled",
             "trend_period",
             "pattern_state", "pattern_key", "pattern_bias", "pattern_target",
             "pattern_last_bar_time",
         ]
         read_only_fields = [
             "id", "created_at", "updated_at", "last_triggered_at", "last_rsi_value",
-            "macd_triggered",
             "pattern_state", "pattern_key", "pattern_bias", "pattern_target",
             "pattern_last_bar_time",
         ]

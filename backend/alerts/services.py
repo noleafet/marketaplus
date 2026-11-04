@@ -1,5 +1,4 @@
 from datetime import datetime, timezone as dt_timezone
-from decimal import Decimal
 import html
 import logging
 import math
@@ -630,7 +629,6 @@ def check_alerts(*, stdout=None):
                             ),
                             observed_value=macd["close"],
                         )
-                        alert.macd_triggered = True
             elif alert.kind == Alert.Kind.RSI:
                 bar_time = rsi["bar_time"]
                 rsi_value = rsi["rsi"]
@@ -676,7 +674,7 @@ def check_alerts(*, stdout=None):
             alert.save(update_fields=[
                 "active", "last_triggered_at", "last_observed_value", "last_bar_open_time",
                 "last_macd_diff", "last_macd_gap_percent", "last_macd_warning_threshold",
-                "last_rsi_value", "macd_triggered", "updated_at"
+                "last_rsi_value", "updated_at"
             ])
 
     for event in fired:

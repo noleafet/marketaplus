@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import { fmt } from "@/lib/format";
-import { chartIntervals } from "@/types/market";
+import { intervals } from "@/types/market";
 import type { Exchange, MarketEvent, Timeframe } from "@/types/market";
 import MarketEvents from "./market-events";
 
@@ -74,7 +74,7 @@ export default function MarketHeader({
           <option value="bybit">Bybit</option>
         </select>
         <div className="timeframes">
-          {chartIntervals.map((interval) => (
+          {intervals.map((interval) => (
             <button
               key={interval}
               aria-pressed={timeframe === interval}

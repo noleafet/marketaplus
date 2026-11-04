@@ -183,7 +183,6 @@ class Alert(models.Model):
     macd_threshold_5 = models.BooleanField(default=False, help_text="Enable 5% MACD cross approach threshold")
     macd_threshold_10 = models.BooleanField(default=False, help_text="Enable 10% MACD cross approach threshold")
     rsi_enabled = models.BooleanField(default=True, help_text="Enable RSI context by default")
-    macd_triggered = models.BooleanField(default=False, help_text="Track if MACD has triggered for cascading RSI alert")
     trend_enabled = models.BooleanField(default=True, help_text="Enable EMA trend context by default")
     trend_period = models.PositiveSmallIntegerField(default=100, null=True, blank=True, help_text="EMA period for the trend filter (defaults to the 100 EMA)")
 
