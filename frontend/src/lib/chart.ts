@@ -57,15 +57,15 @@ export function drawingCoordinate(
  * the source's bar spacing instead would leave the narrower pane short of bars and slide its
  * left edge out of line with the candles above it.
  */
-function copyWindow(from: IChartApi, to: IChartApi) {
+function copyWindow(from: IChartApi, to: IChartApi): boolean {
   const source = from.timeScale();
   const target = to.timeScale();
   const range = source.getVisibleLogicalRange();
   // A pane with no bars has no window to describe yet.
-  if (!range) return;
+  if (!range) return false;
   // Hidden panes report a zero width until they are shown. Applying that would squeeze every bar
   // into one pixel and the later resize would inherit a broken window.
-  if (!source.width() || !target.width()) return;
+  if (!source.width() || !target.width()) return false;
   const barSpacing = target.width() / Math.max(1, range.to - range.from + 1);
   const rightOffset = source.scrollPosition();
   // Re-applying an unchanged window still invalidates the pane, so skip that no-op. Bar spacing
@@ -78,10 +78,11 @@ function copyWindow(from: IChartApi, to: IChartApi) {
     ) < 1e-6 &&
     Math.abs(target.scrollPosition() - rightOffset) < 1e-9
   ) {
-    return;
+    return true;
   }
   // Bar spacing has to go first: the right offset is clamped against it.
   target.applyOptions({ barSpacing, rightOffset });
+  return true;
 }
 
 /**
@@ -91,15 +92,28 @@ function copyWindow(from: IChartApi, to: IChartApi) {
  * lands the copy on the wrong bar spacing and slides the target pane out of line.
  */
 const windowCopyQueued = new WeakSet<IChartApi>();
+/** Callbacks waiting on the queued copy, so several callers can observe one application. */
+const windowCopyCallbacks = new WeakMap<IChartApi, (() => void)[]>();
 
-export function copyWindowSoon(from: IChartApi, to: IChartApi) {
+export function copyWindowSoon(
+  from: IChartApi,
+  to: IChartApi,
+  onApplied?: () => void,
+) {
   // A drag changes the visible range on every frame, so only one copy per pane is worth queueing.
+  if (onApplied) {
+    const pending = windowCopyCallbacks.get(to) ?? [];
+    pending.push(onApplied);
+    windowCopyCallbacks.set(to, pending);
+  }
   if (windowCopyQueued.has(to)) return;
   windowCopyQueued.add(to);
   requestAnimationFrame(() => {
     windowCopyQueued.delete(to);
+    const callbacks = windowCopyCallbacks.get(to) ?? [];
+    windowCopyCallbacks.delete(to);
     try {
-      copyWindow(from, to);
+      if (copyWindow(from, to)) for (const callback of callbacks) callback();
     } catch {
       /* The target pane is still empty; its data pass retries. */
     }

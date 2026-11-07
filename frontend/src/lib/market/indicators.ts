@@ -64,12 +64,17 @@ export function atr(bars: Bar[], period = 14): (number | null)[] {
   return result;
 }
 
+/** Standard MACD periods: EMA-12 minus EMA-26, signalled by EMA-9 of the line. */
+export const MACD_FAST_PERIOD = 12;
+export const MACD_SLOW_PERIOD = 26;
+export const MACD_SIGNAL_PERIOD = 9;
+
 /** MACD line, signal, and histogram, all aligned to the close array. */
 export function macdValues(
   closes: number[],
-  fastPeriod = 12,
-  slowPeriod = 26,
-  signalPeriod = 9,
+  fastPeriod = MACD_FAST_PERIOD,
+  slowPeriod = MACD_SLOW_PERIOD,
+  signalPeriod = MACD_SIGNAL_PERIOD,
 ): {
   line: (number | null)[];
   signal: (number | null)[];

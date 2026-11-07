@@ -233,8 +233,8 @@
 .drawing-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
 .drawing-overlay.interactive{pointer-events:auto;touch-action:none;cursor:move}
 .pattern-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
-.macd-chart,.rsi-chart,.atr-chart{width:100%;min-width:0;height:142px;border-top:1px solid var(--line);overflow:hidden}
-.macd-chart[hidden],.rsi-chart[hidden],.atr-chart[hidden]{display:none}
+.macd-chart,.rsi-chart{width:100%;min-width:0;height:142px;border-top:1px solid var(--line);overflow:hidden}
+.macd-chart[hidden],.rsi-chart[hidden]{display:none}
 .workspace-grid .chart-hint{line-height:1.5}
 .watchlist{display:grid;}
 /* The 24-hour columns and the five scan columns share one grid, so a very narrow panel

@@ -1215,8 +1215,7 @@ footer {
 }
 
 .macd-chart,
-.rsi-chart,
-.atr-chart {
+.rsi-chart {
   border-top-color: hsl(var(--border));
 }
 

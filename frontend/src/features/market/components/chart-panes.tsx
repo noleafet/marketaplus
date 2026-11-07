@@ -16,7 +16,6 @@ type Props = {
   patternCanvas: RefObject<HTMLCanvasElement | null>;
   macdHost: RefObject<HTMLDivElement | null>;
   rsiHost: RefObject<HTMLDivElement | null>;
-  atrHost: RefObject<HTMLDivElement | null>;
   preferences: Preferences;
   timeframe: Timeframe;
   selected: string | null;
@@ -25,7 +24,6 @@ type Props = {
   legendTime: number | null;
   legendMacd: MacdLegend | null;
   legendRsi: number | null;
-  legendAtr: number | null;
   /** True while the bar under the pointer is the still-forming newest candle. */
   live: boolean;
   message: string;
@@ -48,7 +46,6 @@ export default function ChartPanes({
   patternCanvas,
   macdHost,
   rsiHost,
-  atrHost,
   preferences,
   timeframe,
   selected,
@@ -57,7 +54,6 @@ export default function ChartPanes({
   legendTime,
   legendMacd,
   legendRsi,
-  legendAtr,
   live,
   message,
   patternNote,
@@ -168,18 +164,6 @@ export default function ChartPanes({
             timeframe={timeframe}
             pane
             entries={[{ label: "RSI 14", value: fmt(legendRsi), tone: rsiTone }]}
-          />
-        )}
-      </div>
-      <div className="indicator-pane" hidden={!preferences.indicators.atr}>
-        <div ref={atrHost} className="atr-chart" hidden={!preferences.indicators.atr} />
-        {legendReady && (
-          <ChartLegend
-            ariaLabel="ATR details"
-            time={legendTime}
-            timeframe={timeframe}
-            pane
-            entries={[{ label: "ATR 14", value: fmt(legendAtr) }]}
           />
         )}
       </div>

@@ -50,7 +50,6 @@ export const defaultPreferences: Preferences = {
     vol: true,
     macd: false,
     rsi: false,
-    atr: false,
     bb: false,
     keyLevel: false,
     trendBias: false,

@@ -119,7 +119,6 @@ export type Preferences = {
     vol: boolean;
     macd: boolean;
     rsi: boolean;
-    atr: boolean;
     bb: boolean;
     keyLevel: boolean;
     trendBias: boolean;

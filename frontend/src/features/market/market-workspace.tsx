@@ -97,7 +97,6 @@ function entryZones(line: Drawing): DrawingZone[] {
 
 type PaneIndicatorValues = {
   rsi: (number | null)[];
-  atr: (number | null)[];
   macd: {
     line: (number | null)[];
     signal: (number | null)[];
@@ -109,28 +108,23 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
   const colors = palettes[theme];
   const macdHost = useRef<HTMLDivElement>(null);
   const rsiHost = useRef<HTMLDivElement>(null);
-  const atrHost = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   /** Layer the pattern overlay is drawn on, kept apart from the user's drawings. */
   const patternCanvas = useRef<HTMLCanvasElement>(null);
   const chartApi = useRef<ReturnType<typeof createChart> | null>(null);
   const macdApi = useRef<ReturnType<typeof createChart> | null>(null);
   const rsiApi = useRef<ReturnType<typeof createChart> | null>(null);
-  const atrApi = useRef<ReturnType<typeof createChart> | null>(null);
   const series = useRef<{ candles: ReturnType<ReturnType<typeof createChart>["addCandlestickSeries"]>; volume: ReturnType<ReturnType<typeof createChart>["addHistogramSeries"]>; ema100: ReturnType<ReturnType<typeof createChart>["addLineSeries"]>; ema200: ReturnType<ReturnType<typeof createChart>["addLineSeries"]>; bbUpper: ReturnType<ReturnType<typeof createChart>["addLineSeries"]>; bbMiddle: ReturnType<ReturnType<typeof createChart>["addLineSeries"]>; bbLower: ReturnType<ReturnType<typeof createChart>["addLineSeries"]> } | null>(null);
   const macdSeries = useRef<{ histogram: ReturnType<ReturnType<typeof createChart>["addHistogramSeries"]>; line: ReturnType<ReturnType<typeof createChart>["addLineSeries"]>; signal: ReturnType<ReturnType<typeof createChart>["addLineSeries"]> } | null>(null);
   const rsiSeries = useRef<{ line: ReturnType<ReturnType<typeof createChart>["addLineSeries"]> } | null>(null);
-  const atrSeries = useRef<{ line: ReturnType<ReturnType<typeof createChart>["addLineSeries"]> } | null>(null);
   const barsRef = useRef<Bar[]>([]);
   const modeRef = useRef<Tool | null>(null);
   const pendingRef = useRef<{ time: number; price: number } | null>(null);
   const dragRef = useRef<{ id: string; part: "p1" | "p2" | "body"; start: { time: number; price: number }; original: Drawing } | null>(null);
   const modifiers = useRef({ ctrl: false, shift: false });
-  const syncing = useRef(false);
   /** Latest indicator arrays, used to put a meaningful horizontal crosshair in each pane. */
   const indicatorValues = useRef<PaneIndicatorValues>({
     rsi: [],
-    atr: [],
     macd: { line: [], signal: [], histogram: [] },
   });
   /** Moving between panes fires a leave then an enter; delay the clear so it cannot win. */
@@ -152,7 +146,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
   /** Index of the candle under the crosshair in any pane; null falls back to the newest bar. */
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   /** First non-null value in each lower pane, so a pane's logical index can be mapped to a bar. */
-  const paneStarts = useRef({ macd: 0, rsi: 0, atr: 0 });
+  const paneStarts = useRef({ macd: 0, rsi: 0 });
   const [quote, setQuote] = useState<number | null>(null);
   const [change, setChange] = useState<number | null>(null);
   const [events, setEvents] = useState<MarketEvent[]>([]);
@@ -206,6 +200,12 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
   const repaintRef = useRef<() => void>(() => {});
   /** Drawings as the chart click handler sees them, without re-subscribing on every edit. */
   const drawingsRef = useRef<Drawing[]>([]);
+  /**
+   * Panes that have received at least one window copy from the stack. Until then their own
+   * range changes are layout noise - a freshly shown pane reports its default window - so only
+   * an aligned pane is allowed to move the others.
+   */
+  const paneAligned = useRef(new Set<IChartApi>());
   /** Candlestick formations already reported, so one shape is never announced twice. */
   const formationSeen = useRef<Set<string>>(new Set());
   const preferencesRef = useRef(preferences);
@@ -407,13 +407,13 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     const chartElement = host.current;
     const macdElement = macdHost.current;
     const rsiElement = rsiHost.current;
-    const atrElement = atrHost.current;
-    if (!chartElement || !macdElement || !rsiElement || !atrElement) return;
+    if (!chartElement || !macdElement || !rsiElement) return;
     setHoveredIndex(null);
     setConnection("loading");
     setHistoryLoading(false);
     // Formations belong to the pair and interval that reported them; a new chart starts clean.
     formationSeen.current.clear();
+    paneAligned.current.clear();
     let active = true;
     let pollTimer: number | undefined;
     let pollDelay = CHART_REFRESH_MS;
@@ -454,13 +454,10 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     });
     rsiLine.createPriceLine({ price: 70, color: colors.line, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" });
     rsiLine.createPriceLine({ price: 30, color: colors.line, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" });
-    const atrChart = makeChart(atrElement);
-    const atrLine = atrChart.addLineSeries({ color: colors.amber, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
-    chartApi.current = chart; macdApi.current = macdChart; rsiApi.current = rsiChart; atrApi.current = atrChart;
+    chartApi.current = chart; macdApi.current = macdChart; rsiApi.current = rsiChart;
     series.current = { candles, volume, ema100: ema100Series, ema200: ema200Series, bbUpper: bbUpperSeries, bbMiddle: bbMiddleSeries, bbLower: bbLowerSeries };
     macdSeries.current = { histogram, line: macdLine, signal: signalLine };
     rsiSeries.current = { line: rsiLine };
-    atrSeries.current = { line: atrLine };
     // The bar spacing of a window comes from the pane width, so a window cannot be worked out
     // until the pane has one. Asking before then is not merely ignored: the library clamps the
     // right offset against a width of zero and leaves the whole history squeezed against the left
@@ -507,7 +504,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
       if (!active) return;
       requestAnimationFrame(() => {
         if (!active) return;
-        const scales = [chart, macdChart, rsiChart, atrChart].map((api) => api.priceScale("right"));
+        const scales = [chart, macdChart, rsiChart].map((api) => api.priceScale("right"));
         const width = Math.max(...scales.map((scale) => scale.width()));
         if (width > 0) {
           for (const scale of scales) {
@@ -522,16 +519,13 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
       fitChart(chart, chartElement);
       fitChart(macdChart, macdElement);
       fitChart(rsiChart, rsiElement);
-      fitChart(atrChart, atrElement);
       applyLatestWindowSoon();
-      copyWindowSoon(chart, macdChart);
-      copyWindowSoon(chart, rsiChart);
-      copyWindowSoon(chart, atrChart);
+      syncPanes(chart);
       equalizePriceScales();
       // The overlay uses the chart's pixel coordinates, which a resize changes.
       repaintRef.current();
     });
-    observer.observe(chartElement); observer.observe(macdElement); observer.observe(rsiElement); observer.observe(atrElement);
+    observer.observe(chartElement); observer.observe(macdElement); observer.observe(rsiElement);
     /** Projects a saved drawing into pixels for hit-testing, mirroring how the overlay paints it. */
     function drawingScreenLine(line: Drawing): ScreenLine | null {
       const plotWidth = chart.timeScale().width() || chartElement?.clientWidth || 0;
@@ -607,7 +601,6 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
       chart.clearCrosshairPosition();
       macdChart.clearCrosshairPosition();
       rsiChart.clearCrosshairPosition();
-      atrChart.clearCrosshairPosition();
     };
     const scheduleCrosshairClear = () => {
       window.clearTimeout(crosshairClearTimer.current);
@@ -622,7 +615,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     // The same time is then projected into every other pane with a real value for that bar, so the
     // vertical line runs through the whole stack instead of only the pane under the pointer.
     const follow = (
-      source: "price" | "macd" | "rsi" | "atr",
+      source: "price" | "macd" | "rsi",
       sourceChart: IChartApi,
       param: MouseEventParams,
       start: number,
@@ -663,36 +656,42 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
         if (value === null) rsiChart.clearCrosshairPosition();
         else try { rsiChart.setCrosshairPosition(value, time, rsiLine); } catch { rsiChart.clearCrosshairPosition(); }
       }
-      if (source !== "atr") {
-        const value = indicators.atr
-          && values.atr.length === data.length
-          && index >= paneStarts.current.atr
-          ? values.atr[index]
-          : null;
-        if (value === null) atrChart.clearCrosshairPosition();
-        else try { atrChart.setCrosshairPosition(value, time, atrLine); } catch { atrChart.clearCrosshairPosition(); }
-      }
     };
     chart.subscribeCrosshairMove((param) => follow("price", chart, param, 0));
     macdChart.subscribeCrosshairMove((param) => follow("macd", macdChart, param, paneStarts.current.macd));
     rsiChart.subscribeCrosshairMove((param) => follow("rsi", rsiChart, param, paneStarts.current.rsi));
-    atrChart.subscribeCrosshairMove((param) => follow("atr", atrChart, param, paneStarts.current.atr));
-    // The two charts hold different bars: the MACD series start after the EMA warm-up, so their
-    // logical indices point at different timestamps. The price pane drives the MACD pane rather
-    // than the other way round: the copy is queued and applied on a later frame, so a two-way sync
-    // would bounce between the panes and neither would settle. Following one way also means the
-    // price chart is free to be dragged past the newest candle, which is the point.
+    // The panes hold different bars: the indicator series start after their warm-up, so their
+    // logical indices point at different timestamps. copyWindow carries the bar count and right
+    // offset over instead, which keeps every pane on the same stretch of time, future space
+    // included. Any pane can be dragged or zoomed, so each one re-aligns the rest; a copy that
+    // lands on an already-matching window is skipped, so the echoes settle instead of bouncing.
+    function syncPanes(source: IChartApi) {
+      const indicators = preferencesRef.current.indicators;
+      for (const target of [chart, macdChart, rsiChart]) {
+        if (target === source) continue;
+        if (target === macdChart && !indicators.macd) continue;
+        if (target === rsiChart && !indicators.rsi) continue;
+        // The first successful copy marks the pane aligned; only then may it steer the stack.
+        copyWindowSoon(
+          source,
+          target,
+          target === chart ? undefined : () => paneAligned.current.add(target),
+        );
+      }
+    }
     chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
-      if (syncing.current) return;
       // The drawing and pattern overlays are painted in pixels, so a pan or zoom moves them too.
       repaintRef.current();
-      const indicators = preferencesRef.current.indicators;
-      if (indicators.macd) copyWindowSoon(chart, macdChart);
-      if (indicators.rsi) copyWindowSoon(chart, rsiChart);
-      if (indicators.atr) copyWindowSoon(chart, atrChart);
+      syncPanes(chart);
       // Scrolling back to the left edge asks the exchange for the page before the loaded history.
       const range = chart.timeScale().getVisibleLogicalRange();
       if (range && range.from <= HISTORY_TRIGGER_BARS) void loadOlder();
+    });
+    macdChart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+      if (paneAligned.current.has(macdChart)) syncPanes(macdChart);
+    });
+    rsiChart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+      if (paneAligned.current.has(rsiChart)) syncPanes(rsiChart);
     });
 
     async function requestCandles(limit: number, endTime?: number): Promise<Bar[]> {
@@ -742,10 +741,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
         renderBars(mergeBars(older, data, true));
         // The new candles sit before the old first bar, so the same window shifts right by their count.
         if (range) chart.timeScale().setVisibleLogicalRange({ from: range.from + added, to: range.to + added });
-        const indicators = preferencesRef.current.indicators;
-        if (indicators.macd) copyWindowSoon(chart, macdChart);
-        if (indicators.rsi) copyWindowSoon(chart, rsiChart);
-        if (indicators.atr) copyWindowSoon(chart, atrChart);
+        syncPanes(chart);
         repaintRef.current();
       } catch (error) {
         if (active) {
@@ -837,23 +833,23 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
       equalizeScaleWidths.current = () => {};
       repaintRef.current = () => {};
       observer.disconnect();
-      chart.remove(); macdChart.remove(); rsiChart.remove(); atrChart.remove();
-      chartApi.current = null; macdApi.current = null; rsiApi.current = null; atrApi.current = null;
-      series.current = null; macdSeries.current = null; rsiSeries.current = null; atrSeries.current = null;
+      chart.remove(); macdChart.remove(); rsiChart.remove();
+      chartApi.current = null; macdApi.current = null; rsiApi.current = null;
+      series.current = null; macdSeries.current = null; rsiSeries.current = null;
     };
   }, [symbol, exchange, timeframe, theme, onPriceSelect, reloadKey]);
 
   useEffect(() => {
-    const chart = chartApi.current; const macdChart = macdApi.current; const rsiChart = rsiApi.current; const atrChart = atrApi.current;
-    const current = series.current; const macd = macdSeries.current; const rsiPane = rsiSeries.current; const atrPane = atrSeries.current;
-    if (!chart || !macdChart || !rsiChart || !atrChart || !current || !macd || !rsiPane || !atrPane) return;
+    const chart = chartApi.current; const macdChart = macdApi.current; const rsiChart = rsiApi.current;
+    const current = series.current; const macd = macdSeries.current; const rsiPane = rsiSeries.current;
+    if (!chart || !macdChart || !rsiChart || !current || !macd || !rsiPane) return;
     const data = bars;
     current.candles.setData(preferences.candleType === "ha" ? heikinAshi(data) : data);
     current.volume.setData(preferences.indicators.vol ? data.map((bar) => ({ time: bar.time, value: bar.volume, color: bar.close >= bar.open ? "rgba(77,148,104,.28)" : "rgba(191,102,88,.28)" })) : []);
     // One shared calculation feeds the panes, the legend and the crosshair values.
-    const { rsi: rsiValues, atr: atrValues, macd: macdAll } = indicatorSet;
-    indicatorValues.current = { rsi: rsiValues, atr: atrValues, macd: macdAll };
-    /** Largest recent magnitude, so tiny MACD/ATR values do not collapse to "0.00" on the axes. */
+    const { rsi: rsiValues, macd: macdAll } = indicatorSet;
+    indicatorValues.current = { rsi: rsiValues, macd: macdAll };
+    /** Largest recent magnitude, so tiny MACD values do not collapse to "0.00" on the axis. */
     const maxAbs = (values: (number | null)[], lookback = 200) => {
       let max = 0;
       for (let index = Math.max(0, values.length - lookback); index < values.length; index += 1) {
@@ -872,9 +868,8 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     macd.histogram.applyOptions({ priceFormat: macdFormat });
     macd.line.applyOptions({ priceFormat: macdFormat });
     macd.signal.applyOptions({ priceFormat: macdFormat });
-    atrPane.line.applyOptions({ priceFormat: valueFormat(maxAbs(atrValues)) });
     paneStarts.current = {
-      macd: firstValueIndex(macdAll.line), rsi: firstValueIndex(rsiValues), atr: firstValueIndex(atrValues),
+      macd: firstValueIndex(macdAll.line), rsi: firstValueIndex(rsiValues),
     };
     const emaEnabled = preferences.indicators.ema;
     current.ema100.setData(emaEnabled ? indicatorPoints(data, indicatorSet.ema100) : []);
@@ -885,23 +880,17 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     current.bbLower.setData(preferences.indicators.bb ? indicatorPoints(data, bands.lower) : []);
     const macdEnabled = preferences.indicators.macd;
     const rsiEnabled = preferences.indicators.rsi;
-    const atrEnabled = preferences.indicators.atr;
     if (macdHost.current) macdHost.current.hidden = !macdEnabled;
     if (rsiHost.current) rsiHost.current.hidden = !rsiEnabled;
-    if (atrHost.current) atrHost.current.hidden = !atrEnabled;
     // A hidden pane must not keep an old synthetic crosshair to show when it is enabled again.
     if (!macdEnabled) macdChart.clearCrosshairPosition();
     if (!rsiEnabled) rsiChart.clearCrosshairPosition();
-    if (!atrEnabled) atrChart.clearCrosshairPosition();
     // Only the bottom-most visible pane shows a time axis; the price pane hides its own when any lower pane is open.
-    chart.applyOptions({ timeScale: { visible: !macdEnabled && !rsiEnabled && !atrEnabled } });
-    macdChart.applyOptions({ timeScale: { visible: macdEnabled && !rsiEnabled && !atrEnabled } });
-    rsiChart.applyOptions({ timeScale: { visible: rsiEnabled && !atrEnabled } });
-    atrChart.applyOptions({ timeScale: { visible: atrEnabled } });
+    chart.applyOptions({ timeScale: { visible: !macdEnabled && !rsiEnabled } });
+    macdChart.applyOptions({ timeScale: { visible: macdEnabled && !rsiEnabled } });
+    rsiChart.applyOptions({ timeScale: { visible: rsiEnabled } });
     rsiPane.line.setData(rsiEnabled ? indicatorPoints(data, rsiValues) : []);
-    atrPane.line.setData(atrEnabled ? indicatorPoints(data, atrValues) : []);
-    if (rsiEnabled) copyWindowSoon(chart, rsiChart);
-    if (atrEnabled) copyWindowSoon(chart, atrChart);
+    if (rsiEnabled) copyWindowSoon(chart, rsiChart, () => paneAligned.current.add(rsiChart));
     if (!macdEnabled || data.length < 35) {
       macd.histogram.setData([]); macd.line.setData([]); macd.signal.setData([]);
       equalizeScaleWidths.current();
@@ -916,7 +905,7 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     macd.signal.setData(indicatorPoints(data, macdAll.signal));
     // The MACD series start later than the candles, so the panes cannot share logical indices;
     // copying the window keeps them on the same stretch of time, future space included.
-    if (macdEnabled) copyWindowSoon(chart, macdChart);
+    if (macdEnabled) copyWindowSoon(chart, macdChart, () => paneAligned.current.add(macdChart));
     equalizeScaleWidths.current();
   }, [bars, preferences, indicatorSet]);
 
@@ -1434,7 +1423,6 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     const lower = [
       shot(macdApi.current, macdHost.current, indicators.macd),
       shot(rsiApi.current, rsiHost.current, indicators.rsi),
-      shot(atrApi.current, atrHost.current, indicators.atr),
     ].filter((image): image is HTMLCanvasElement => image !== null);
     // Every screenshot is rendered at the chart's own pixel ratio, so one scale covers everything.
     const ratio = price.width / Math.max(1, chartHost.clientWidth);
@@ -2023,7 +2011,6 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
     histogram: indicatorSet.macd.histogram[legendIndex] ?? null,
   } : null;
   const legendRsi = legendIndex >= 0 ? indicatorSet.rsi[legendIndex] ?? null : null;
-  const legendAtr = legendIndex >= 0 ? indicatorSet.atr[legendIndex] ?? null : null;
   const legendTime = legendBar ? Number(legendBar.time) : null;
   /** Signals and trade levels read the last completed candle, never the bar that is still forming. */
   const lastClosedIndex = closedSignalBars.length - 1;
@@ -2117,7 +2104,6 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
             patternCanvas={patternCanvas}
             macdHost={macdHost}
             rsiHost={rsiHost}
-            atrHost={atrHost}
             preferences={preferences}
             timeframe={timeframe}
             selected={selected}
@@ -2126,7 +2112,6 @@ export default function MarketWorkspace({ symbol, exchange = "binance", onExchan
             legendTime={legendTime}
             legendMacd={legendMacd}
             legendRsi={legendRsi}
-            legendAtr={legendAtr}
             live={legendLive}
             message={message}
             patternNote={patternNote}

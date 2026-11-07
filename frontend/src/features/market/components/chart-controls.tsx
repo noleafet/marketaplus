@@ -9,7 +9,6 @@ const indicatorChips = [
   ["bb", "Bollinger"],
   ["macd", "MACD"],
   ["rsi", "RSI"],
-  ["atr", "ATR"],
   ["keyLevel", "Key Level"],
   ["trendBias", "Trend Bias"],
 ] as const;
