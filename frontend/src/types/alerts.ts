@@ -1,7 +1,7 @@
 export type AlertItem = {
   id: number;
   symbol: string;
-  kind: "price" | "macd" | "pattern";
+  kind: "price" | "macd" | "pattern" | "trend_recovery";
   condition: string;
   price: string | null;
   timeframe: string;
@@ -31,6 +31,8 @@ export type AlertItem = {
   pattern_bias?: string;
   pattern_target?: number | null;
   pattern_last_bar_time?: string | null;
+  recovery_trigger?: "sma" | "ema";
+  recovery_last_bar_time?: string | null;
 };
 
 export type EventItem = {
@@ -47,5 +49,6 @@ export type ToastItem = {
   message: string;
 };
 
-export type AlertKind = "price" | "macd" | "pattern";
+export type AlertKind = "price" | "macd" | "pattern" | "trend_recovery";
+export type RecoveryTrigger = "sma" | "ema";
 export type RsiSettings = { period: string; oversold: string; overbought: string };

@@ -43,12 +43,12 @@ class AlertSerializer(serializers.ModelSerializer):
             "macd_threshold_10", "rsi_enabled", "trend_enabled",
             "trend_period",
             "pattern_state", "pattern_key", "pattern_bias", "pattern_target",
-            "pattern_last_bar_time",
+            "pattern_last_bar_time", "recovery_trigger", "recovery_last_bar_time",
         ]
         read_only_fields = [
             "id", "created_at", "updated_at", "last_triggered_at", "last_rsi_value",
             "pattern_state", "pattern_key", "pattern_bias", "pattern_target",
-            "pattern_last_bar_time",
+            "pattern_last_bar_time", "recovery_last_bar_time",
         ]
 
     def validate_symbol(self, value):
@@ -158,16 +158,42 @@ class AlertSerializer(serializers.ModelSerializer):
             # The engine chooses the shape and its levels, so the caller never names a condition.
             if not attrs.get("condition"):
                 attrs["condition"] = Alert.Condition.CROSS
+        elif kind == Alert.Kind.TREND_RECOVERY:
+            # The strategy fixes its timeframes: 1D and 4H trend filters with a
+            # 1H trigger, so the alert's own timeframe must be the 1H leg.
+            timeframe = attrs.get("timeframe", getattr(self.instance, "timeframe", ""))
+            if timeframe != "1h":
+                raise serializers.ValidationError({
+                    "timeframe": "Trend recovery alerts always evaluate the 1h trigger.",
+                })
+            if attrs.get("price", getattr(self.instance, "price", None)) is not None:
+                raise serializers.ValidationError({
+                    "price": "A trend recovery alert follows MACD structure, not a target price.",
+                })
+            if attrs.get("line_type", ""):
+                raise serializers.ValidationError({"line_type": "Line alerts are only available for price alerts."})
+            if not attrs.get("condition"):
+                attrs["condition"] = Alert.Condition.CROSS
+            trigger = attrs.get(
+                "recovery_trigger", getattr(self.instance, "recovery_trigger", "sma"),
+            )
+            if trigger not in Alert.RecoveryTrigger.values:
+                raise serializers.ValidationError({
+                    "recovery_trigger": "Choose sma (SMA 3/10) or ema (EMA 12/100).",
+                })
         elif kind == Alert.Kind.RSI:
             raise serializers.ValidationError({"kind": "RSI alerts are only available as a confirmation option for MACD alerts. Create a MACD alert and enable its RSI context."})
         return attrs
 
     # Changing what an alert watches, or waking it after a pause, makes its stored readings
     # stale: comparing them with fresh ones would report a cross that never happened.
-    REARM_FIELDS = ("symbol", "kind", "condition", "timeframe", "rsi_timeframe", "rsi_period")
+    REARM_FIELDS = (
+        "symbol", "kind", "condition", "timeframe", "rsi_timeframe", "rsi_period",
+        "recovery_trigger",
+    )
     STATE_FIELDS = (
         "last_observed_value", "last_bar_open_time", "last_macd_diff", "last_macd_gap_percent",
-        "last_macd_warning_threshold", "last_rsi_value",
+        "last_macd_warning_threshold", "last_rsi_value", "recovery_last_bar_time",
     )
 
     def update(self, instance, validated_data):

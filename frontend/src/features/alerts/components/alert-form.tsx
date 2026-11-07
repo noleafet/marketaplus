@@ -1,9 +1,9 @@
 import type { FormEvent } from "react";
 import type {
-  AlertKind, RsiSettings,
+  AlertKind, RecoveryTrigger, RsiSettings,
 } from "@/types/alerts";
 import {
-  conditions, contextTimeframes, timeframes,
+  conditions, contextTimeframes, recoveryTriggers, timeframes,
   type ContextTimeframe,
 } from "../constants";
 
@@ -34,7 +34,10 @@ export type AlertFormModel = {
   onTrendPeriodChange: (period: string) => void;
   patternTimeframe: (typeof timeframes)[number];
   onPatternTimeframeChange: (timeframe: (typeof timeframes)[number]) => void;
+  recoveryTrigger: RecoveryTrigger;
+  onRecoveryTriggerChange: (trigger: RecoveryTrigger) => void;
   patternSummary: string;
+  recoverySummary: string;
   fieldErrors: Record<string, string>;
   busy: boolean;
   macdSummary: string;
@@ -73,7 +76,10 @@ export default function AlertForm({ model, onSubmit }: Props) {
     onTrendPeriodChange,
     patternTimeframe,
     onPatternTimeframeChange,
+    recoveryTrigger,
+    onRecoveryTriggerChange,
     patternSummary,
+    recoverySummary,
     fieldErrors,
     busy,
     macdSummary,
@@ -97,6 +103,9 @@ export default function AlertForm({ model, onSubmit }: Props) {
         </button>
         <button className={kind === "pattern" ? "selected" : ""} onClick={() => onKindChange("pattern")}>
           Pattern forming
+        </button>
+        <button className={kind === "trend_recovery" ? "selected" : ""} onClick={() => onKindChange("trend_recovery")}>
+          Trend Recovery
         </button>
       </div>
       <form onSubmit={onSubmit} className="alert-form">
@@ -362,6 +371,39 @@ export default function AlertForm({ model, onSubmit }: Props) {
             <div className="macd-summary" aria-live="polite">
               <b>This alert will</b>
               <p>{patternSummary}</p>
+            </div>
+          </div>
+        )}
+        {kind === "trend_recovery" && (
+          <div className="macd-config">
+            <div className="config-row">
+              <label>
+                1H trigger
+                <select
+                  name="recovery_trigger"
+                  value={recoveryTrigger}
+                  onChange={(event) =>
+                    onRecoveryTriggerChange(event.target.value as RecoveryTrigger)
+                  }
+                >
+                  {Object.entries(recoveryTriggers).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <p className="config-note">
+              Fixed filters: 1D MACD (EMA 19/39) and 4H MACD (EMA 12/26) must agree on the
+              trend. The 1H MACD needs a pullback of at least 3 closed bars through zero
+              before an early warning, then a zero-line cross on a closed candle confirms.
+              EMA 12/100 is the slower alternative to SMA 3/10 — pick one, they are never
+              combined.
+            </p>
+            <div className="macd-summary" aria-live="polite">
+              <b>This alert will</b>
+              <p>{recoverySummary}</p>
             </div>
           </div>
         )}

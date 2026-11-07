@@ -10,7 +10,9 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from alerts.events import sync_market_events
 from alerts.models import AppConfiguration
-from alerts.services import check_alerts, check_pattern_alerts
+from alerts.services import (
+    check_alerts, check_pattern_alerts, check_recovery_alerts,
+)
 
 logger = logging.getLogger(__name__)
 PATTERN_POLL_SECONDS = 60
@@ -71,6 +73,18 @@ class Command(BaseCommand):
                     "Chart-pattern check failed; it will be retried on the next scheduled run."
                 ))
 
+        def poll_recovery():
+            try:
+                self.stdout.write(
+                    f"Checking trend-recovery alerts (poll interval: {PATTERN_POLL_SECONDS}s)."
+                )
+                check_recovery_alerts(stdout=self.stdout)
+            except Exception:
+                logger.exception("Scheduled trend-recovery check failed")
+                self.stderr.write(self.style.ERROR(
+                    "Trend-recovery check failed; it will be retried on the next scheduled run."
+                ))
+
         def sync_events():
             try:
                 self.stdout.write("Scraping CoinMarketCal events for the watchlist.")
@@ -107,6 +121,16 @@ class Command(BaseCommand):
             coalesce=True,
         )
         scheduler.add_job(
+            poll_recovery,
+            trigger=IntervalTrigger(
+                seconds=PATTERN_POLL_SECONDS, timezone=timezone.get_current_timezone(),
+            ),
+            id="check-trend-recovery-alerts",
+            next_run_time=timezone.now(),
+            max_instances=1,
+            coalesce=True,
+        )
+        scheduler.add_job(
             sync_events,
             trigger=CronTrigger(
                 hour=MARKET_EVENT_SYNC_HOURS, minute=0, timezone=dt_timezone.utc,
@@ -117,7 +141,7 @@ class Command(BaseCommand):
         )
         self.stdout.write(self.style.SUCCESS(
             f"Alert scheduler started; checking immediately, then every {interval}s. "
-            f"Chart patterns run every {PATTERN_POLL_SECONDS}s. "
+            f"Chart patterns and trend recovery run every {PATTERN_POLL_SECONDS}s. "
             f"Market events sync every 4 hours from 02:00 UTC. Ctrl+C stops it."
         ))
         try:

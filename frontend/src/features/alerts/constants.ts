@@ -26,6 +26,12 @@ export const patternLabels: Record<string, string> = {
 export const contextTimeframes = ["5m", "15m", "1h", "4h", "1d"] as const;
 export type ContextTimeframe = (typeof contextTimeframes)[number];
 
+/** 1H MACD trigger configurations for the trend recovery alert. */
+export const recoveryTriggers: Record<string, string> = {
+  sma: "SMA 3/10",
+  ema: "EMA 12/100",
+};
+
 export const defaultRsiSettings = {
   period: "14",
   oversold: "30",

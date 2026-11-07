@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .events import sync_market_events
-from .services import check_alerts, check_pattern_alerts
+from .services import check_alerts, check_pattern_alerts, check_recovery_alerts
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,11 @@ def _run_alerts(_options, output):
 
 def _run_patterns(_options, output):
     events = check_pattern_alerts(stdout=output)
+    return {"triggered": len(events)}
+
+
+def _run_recovery(_options, output):
+    events = check_recovery_alerts(stdout=output)
     return {"triggered": len(events)}
 
 
@@ -60,6 +65,16 @@ JOBS = {
                 "60 seconds."
             ),
             run=_run_patterns,
+        ),
+        EngineJob(
+            key="recovery",
+            title="Check trend recovery alerts",
+            description=(
+                "Recompute the 1D/4H MACD trend filters and the configured 1H trigger "
+                "over closed candles and advance every trend-recovery alert by one poll, "
+                "the same step the scheduler runs every 60 seconds."
+            ),
+            run=_run_recovery,
         ),
         EngineJob(
             key="events",

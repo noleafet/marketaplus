@@ -135,6 +135,7 @@ class Alert(models.Model):
         MACD = "macd", "MACD cross"
         RSI = "rsi", "RSI"
         PATTERN = "pattern", "Chart pattern"
+        TREND_RECOVERY = "trend_recovery", "Trend recovery"
 
     class Condition(models.TextChoices):
         CROSS_UP = "cross_up", "Crosses above"
@@ -222,6 +223,23 @@ class Alert(models.Model):
         help_text="Internal state: last completed bar evaluated by the pattern monitor",
     )
 
+    # Trend-recovery alerts combine fixed 1D/4H MACD trend filters with a 1H
+    # zero-line trigger. ``recovery_trigger`` picks the 1H configuration and
+    # ``recovery_last_bar_time`` is the last 1H bar close the monitor consumed,
+    # which is what keeps each pullback cycle from reporting twice.
+    class RecoveryTrigger(models.TextChoices):
+        SMA = "sma", "SMA 3/10"
+        EMA = "ema", "EMA 12/100"
+
+    recovery_trigger = models.CharField(
+        max_length=8, choices=RecoveryTrigger.choices, default=RecoveryTrigger.SMA,
+        help_text="1H MACD configuration: SMA 3/10 or the EMA 12/100 variation",
+    )
+    recovery_last_bar_time = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Internal state: last completed 1H bar evaluated by the recovery monitor",
+    )
+
     # Optional line-based price alert, preserving the drawing alert semantics of the chart.
     line_type = models.CharField(max_length=8, choices=LineType.choices, blank=True, default="")
     line_t1 = models.DateTimeField(null=True, blank=True)
@@ -252,6 +270,8 @@ class Alert(models.Model):
             target = f"RSI {self.timeframe}"
         elif self.kind == self.Kind.PATTERN:
             target = f"pattern {self.pattern_key or 'any'} {self.timeframe}"
+        elif self.kind == self.Kind.TREND_RECOVERY:
+            target = f"trend recovery {self.recovery_trigger} {self.timeframe}"
         else:
             target = str(self.price or "line")
         return f"{self.symbol} {self.condition} {target}"

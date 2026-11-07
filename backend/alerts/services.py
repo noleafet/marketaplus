@@ -11,6 +11,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from . import recovery
 from .models import Alert, AppConfiguration, Exchange, Notification, TriggerEvent
 from .patterns import DETECTED_PATTERN_KEYS as PATTERN_SCAN_KEYS
 from .patterns import (
@@ -500,8 +501,13 @@ def check_alerts(*, stdout=None):
     """Fetch current market values, persist alert state/events, and notify on hits."""
     configuration = AppConfiguration.load()
     exchange = Exchange.load()
-    # Pattern alerts run on their own scheduler job (check_pattern_alerts).
-    alerts = list(Alert.objects.filter(active=True).exclude(kind=Alert.Kind.PATTERN).order_by("id"))
+    # Pattern and trend-recovery alerts run on their own scheduler jobs
+    # (check_pattern_alerts, check_recovery_alerts).
+    alerts = list(
+        Alert.objects.filter(active=True)
+        .exclude(kind__in=[Alert.Kind.PATTERN, Alert.Kind.TREND_RECOVERY])
+        .order_by("id")
+    )
     price_symbols = {a.symbol for a in alerts if a.kind == Alert.Kind.PRICE}
     macd_keys = {(a.symbol, a.timeframe) for a in alerts if a.kind == Alert.Kind.MACD}
     # MACD alerts always report RSI and the EMA trend in their message, even when the
@@ -693,6 +699,151 @@ def check_alerts(*, stdout=None):
             logger.exception("Alert %s check failed", snapshot.pk)
             continue
         fired.extend(alert_fired)
+
+    for event in fired:
+        _notify(event, configuration)
+        if stdout is not None:
+            stdout.write(f"Triggered: {event.title} — {event.message}")
+    return fired
+
+
+# Trend-recovery alerts need enough closed candles per timeframe for the MACD
+# warmup: the 1H trigger can be EMA 12/100, the 4H filter EMA 12/26 and the 1D
+# anchor EMA 19/39.
+RECOVERY_CANDLE_LIMITS = {"1h": 500, "4h": 300, "1d": 400}
+
+
+def _recovery_event_title(alert, event):
+    bullish = event["direction"] == "bullish"
+    bias = "Bullish" if bullish else "Bearish"
+    if event["stage"] == "early":
+        return f"{alert.symbol} Trend Recovery - {bias} Early Warning"
+    setup = "Pullback Recovery" if bullish else "Bounce Reversal"
+    return f"{alert.symbol} Trend Recovery - {bias} {setup}"
+
+
+def _recovery_alert_message(alert, event):
+    bullish = event["direction"] == "bullish"
+    bias = "Bullish" if bullish else "Bearish"
+    status = "Early warning" if event["stage"] == "early" else "Confirmed"
+    setup = "pullback recovery" if bullish else "bounce reversal"
+    trigger = recovery.TRIGGER_LABELS.get(alert.recovery_trigger, alert.recovery_trigger)
+    bar_time = datetime.fromtimestamp(event["bar_time"], tz=dt_timezone.utc)
+    lines = [
+        f"Status: {status} - {bias} {setup}",
+        f"Trigger: {trigger} ({alert.timeframe})",
+        f"Current Price: {_format_price(event['close'])}",
+        f"MACD 1h: {_format_indicator(event['macd'])}",
+        f"MACD 4h (EMA 12/26): {_format_indicator(event['h4_macd'])}",
+        f"MACD 1d (EMA 19/39): {_format_indicator(event['daily_macd'])}",
+        f"Pullback: {event['pullback_bars']} 1h bars",
+        f"Report: {_report_url(alert, bar_time, subject=_recovery_event_title(alert, event))}",
+    ]
+    if alert.note:
+        lines.insert(-1, f"Note: {alert.note}")
+    return "\n".join(lines)
+
+
+def check_recovery_alerts(*, stdout=None):
+    """Advance trend-recovery alerts over closed 1H bars.
+
+    The 1D and 4H MACD filters and the configured 1H trigger are recomputed from
+    closed candles on every poll; ``alerts.recovery`` decides which bars produced
+    an early warning or a confirmed cross, and ``recovery_last_bar_time`` keeps
+    each cycle from being reported twice. The first poll only arms the alert at
+    the newest closed bar, matching how MACD alerts treat their first reading.
+    """
+    configuration = AppConfiguration.load()
+    exchange = Exchange.load()
+    candidates = list(
+        Alert.objects.filter(active=True, kind=Alert.Kind.TREND_RECOVERY).order_by("id")
+    )
+    if not candidates:
+        return []
+
+    bars_cache = {}
+
+    def closed_bars(symbol, timeframe):
+        key = (symbol, timeframe)
+        if key not in bars_cache:
+            try:
+                bars_cache[key] = _closed_bars(
+                    symbol, timeframe, exchange, RECOVERY_CANDLE_LIMITS[timeframe],
+                )
+            except (requests.RequestException, KeyError, IndexError, ValueError) as exc:
+                logger.warning(
+                    "Could not fetch %s %s candles for trend recovery: %s",
+                    symbol, timeframe, exc,
+                )
+                bars_cache[key] = None
+        return bars_cache[key]
+
+    fired = []
+    now = timezone.now()
+    for candidate in candidates:
+        try:
+            with transaction.atomic():
+                alert = Alert.objects.select_for_update().filter(
+                    pk=candidate.pk, active=True, kind=Alert.Kind.TREND_RECOVERY,
+                ).first()
+                if alert is None:
+                    continue
+                hour_bars = closed_bars(alert.symbol, "1h")
+                daily_bars = closed_bars(alert.symbol, "1d")
+                h4_bars = closed_bars(alert.symbol, "4h")
+                if not hour_bars or not daily_bars or not h4_bars:
+                    continue
+                daily_signs = recovery.trend_signs(
+                    daily_bars, TIMEFRAME_SECONDS["1d"], "1d",
+                )
+                h4_signs = recovery.trend_signs(
+                    h4_bars, TIMEFRAME_SECONDS["4h"], "4h",
+                )
+                events = recovery.detect_events(
+                    hour_bars, alert.recovery_trigger, daily_signs, h4_signs,
+                )
+                latest_close = hour_bars[-1]["time"] + TIMEFRAME_SECONDS["1h"]
+                latest_bar_time = datetime.fromtimestamp(latest_close, tz=dt_timezone.utc)
+                if alert.recovery_last_bar_time is None:
+                    # Arm at the latest closed 1H bar; never replay history.
+                    alert.recovery_last_bar_time = latest_bar_time
+                    alert.last_observed_value = hour_bars[-1]["close"]
+                    alert.save(update_fields=[
+                        "recovery_last_bar_time", "last_observed_value", "updated_at",
+                    ])
+                    continue
+                last_seen = int(alert.recovery_last_bar_time.timestamp())
+                new_events = [event for event in events if event["bar_time"] > last_seen]
+                created = []
+                for event in new_events:
+                    title = _recovery_event_title(alert, event)
+                    created.append(TriggerEvent.objects.create(
+                        alert=alert,
+                        symbol=alert.symbol,
+                        title=title,
+                        message=_recovery_alert_message(alert, event),
+                        observed_value=event["close"],
+                    ))
+                alert.recovery_last_bar_time = latest_bar_time
+                alert.last_observed_value = hour_bars[-1]["close"]
+                update_fields = [
+                    "recovery_last_bar_time", "last_observed_value", "updated_at",
+                ]
+                # Confirmed crosses respect frequency and cooldown; early
+                # warnings are once-per-cycle by construction and always land.
+                if any(event["stage"] == "confirmed" for event in new_events) \
+                        and _may_fire(alert, now):
+                    alert.last_triggered_at = now
+                    update_fields.append("last_triggered_at")
+                    if alert.frequency == Alert.Frequency.ONCE:
+                        alert.active = False
+                        update_fields.append("active")
+                if created:
+                    fired.extend(created)
+                alert.save(update_fields=update_fields)
+        except Exception:
+            logger.exception("Trend recovery alert %s check failed", candidate.pk)
+            continue
 
     for event in fired:
         _notify(event, configuration)

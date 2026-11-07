@@ -1,5 +1,5 @@
 import type { AlertItem } from "@/types/alerts";
-import { conditions, patternLabels } from "../constants";
+import { conditions, patternLabels, recoveryTriggers } from "../constants";
 
 type Props = {
   alerts: AlertItem[];
@@ -69,7 +69,9 @@ export default function AlertList({
                       ? `MACD · ${item.timeframe}${item.rsi_enabled ? ` + RSI ${item.rsi_timeframe || item.timeframe}` : ""}${item.trend_enabled ? ` + Trend ${item.trend_timeframe || "1h"}` : ""}`
                       : item.kind === "pattern"
                         ? `PATTERN · ${item.timeframe}`
-                        : item.line_type
+                        : item.kind === "trend_recovery"
+                          ? `TREND RECOVERY · 1h`
+                          : item.line_type
                           ? "DRAWING"
                           : "PRICE"}
                   </span>
@@ -88,7 +90,9 @@ export default function AlertList({
                       } · RSI ${item.rsi_timeframe || item.timeframe} · EMA ${item.trend_period || 100}/${item.trend_timeframe || "1h"}`
                     : item.kind === "pattern"
                       ? patternProgress(item)
-                      : item.line_type
+                      : item.kind === "trend_recovery"
+                        ? `1D/4H MACD trend filter · 1h ${recoveryTriggers[item.recovery_trigger ?? "sma"] ?? "SMA 3/10"} trigger · bullish recovery + bearish reversal`
+                        : item.line_type
                         ? `${conditions[item.condition]} drawing level`
                         : `${conditions[item.condition]} ${Number(item.price).toLocaleString()}`}
                   {item.note ? <span className="note"> · {item.note}</span> : null}

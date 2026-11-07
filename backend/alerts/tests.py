@@ -20,10 +20,11 @@ from .events import (
 from .patterns import (
     DETECTED_PATTERN_KEYS, best_pattern, detect_patterns, first_close_past, pattern_evaluate,
 )
+from .recovery import detect_events, macd_series, trend_signs
 from .services import (
     _closed_bars, _ema, _macd_approach_thresholds, _notify,
     _trend_signal, _volume_percent, check_alerts, check_pattern_alerts,
-    get_market_candles, get_market_quote,
+    check_recovery_alerts, get_market_candles, get_market_quote,
 )
 
 
@@ -1436,7 +1437,7 @@ class EngineApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         keys = {job["key"] for job in response.data}
-        self.assertEqual(keys, {"alerts", "patterns", "events"})
+        self.assertEqual(keys, {"alerts", "patterns", "recovery", "events"})
 
     @patch("alerts.engine.check_alerts", return_value=[])
     def test_running_the_alerts_job_returns_captured_output(self, check):
@@ -2285,3 +2286,239 @@ class PatternBreakoutTargetTests(SimpleTestCase):
         self.assertEqual([signal["event"] for signal in signals], ["breakout"])
         self.assertAlmostEqual(signals[0]["level"], 142.0, places=10)
         self.assertAlmostEqual(state["target"], 147.0, places=10)
+
+
+def _recovery_hour_bars(closes, start=0, step=3600):
+    return [
+        {"time": start + index * step, "close": close, "high": close, "low": close}
+        for index, close in enumerate(closes)
+    ]
+
+
+def _recovery_trend_bars(count, direction, step):
+    """Steadily rising (``direction=1``) or falling closes give a signed MACD."""
+    return [
+        {"time": (index - count) * step, "close": 100 + direction * index}
+        for index in range(count)
+    ]
+
+
+def _recovery_signs(direction):
+    daily = trend_signs(_recovery_trend_bars(200, direction, 86400), 86400, "1d")
+    four_hour = trend_signs(_recovery_trend_bars(200, direction, 14400), 14400, "4h")
+    return daily, four_hour
+
+
+BULLISH_HOUR_CLOSES = (
+    [100.0] * 12 + [98, 96, 94, 92, 90, 88]
+    + [89, 91, 93, 96, 100, 105, 111, 118, 126]
+)
+BEARISH_HOUR_CLOSES = (
+    [100.0] * 12 + [102, 104, 106, 108, 110, 112]
+    + [111, 109, 107, 104, 100, 95, 89, 82, 74]
+)
+
+
+class TrendRecoveryDetectionTests(SimpleTestCase):
+    def test_bullish_pullback_warns_then_confirms_on_zero_cross(self):
+        daily, four_hour = _recovery_signs(1)
+        events = detect_events(
+            _recovery_hour_bars(BULLISH_HOUR_CLOSES), "sma", daily, four_hour,
+        )
+
+        self.assertEqual(
+            [(event["direction"], event["stage"]) for event in events],
+            [("bullish", "early"), ("bullish", "confirmed")],
+        )
+        early, confirmed = events
+        self.assertLess(early["bar_time"], confirmed["bar_time"])
+        self.assertLess(early["macd"], 0)
+        self.assertGreaterEqual(confirmed["macd"], 0)
+        self.assertGreaterEqual(confirmed["pullback_bars"], 3)
+        self.assertGreater(confirmed["daily_macd"], 0)
+        self.assertGreater(confirmed["h4_macd"], 0)
+
+    def test_bearish_bounce_warns_then_confirms_on_zero_cross(self):
+        daily, four_hour = _recovery_signs(-1)
+        events = detect_events(
+            _recovery_hour_bars(BEARISH_HOUR_CLOSES), "sma", daily, four_hour,
+        )
+
+        self.assertEqual(
+            [(event["direction"], event["stage"]) for event in events],
+            [("bearish", "early"), ("bearish", "confirmed")],
+        )
+        confirmed = events[-1]
+        self.assertLessEqual(confirmed["macd"], 0)
+        self.assertLess(confirmed["daily_macd"], 0)
+        self.assertLess(confirmed["h4_macd"], 0)
+
+    def test_oscillation_around_zero_never_confirms_a_pullback(self):
+        daily, four_hour = _recovery_signs(1)
+        closes = [100 + (1 if index % 2 else -1) for index in range(60)]
+
+        events = detect_events(_recovery_hour_bars(closes), "sma", daily, four_hour)
+
+        self.assertEqual(events, [])
+
+    def test_losing_trend_alignment_cancels_the_setup(self):
+        daily, four_hour = _recovery_signs(1)
+        # Flip the daily filter bearish halfway through: no bullish recovery may fire.
+        flipped = daily[:20] + [(when, -value) for when, value in daily[20:]]
+        events = detect_events(
+            _recovery_hour_bars(BULLISH_HOUR_CLOSES), "sma", flipped, four_hour,
+        )
+
+        self.assertEqual([event for event in events if event["direction"] == "bullish"], [])
+
+    def test_ema_trigger_confirms_on_a_longer_series(self):
+        daily, four_hour = _recovery_signs(1)
+        closes = [100.0] * 110 + BULLISH_HOUR_CLOSES[12:]
+        events = detect_events(_recovery_hour_bars(closes), "ema", daily, four_hour)
+
+        stages = [(event["direction"], event["stage"]) for event in events]
+        self.assertIn(("bullish", "confirmed"), stages)
+
+    def test_macd_series_needs_warmup_bars(self):
+        macd = macd_series([100.0] * 9, *(("sma", 3), ("sma", 10)))
+        self.assertTrue(all(value is None for value in macd))
+        macd = macd_series([100.0] * 10, *(("sma", 3), ("sma", 10)))
+        self.assertEqual(macd[-1], 0)
+
+
+class TrendRecoveryApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_trend_recovery_alert_is_created_with_defaults(self):
+        response = self.client.post("/api/alerts/", {
+            "symbol": "BTCUSDT", "kind": "trend_recovery", "timeframe": "1h",
+        }, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["kind"], "trend_recovery")
+        self.assertEqual(response.data["condition"], "cross")
+        self.assertEqual(response.data["recovery_trigger"], "sma")
+        self.assertIsNone(response.data["recovery_last_bar_time"])
+
+    def test_trend_recovery_accepts_ema_trigger(self):
+        response = self.client.post("/api/alerts/", {
+            "symbol": "BTCUSDT", "kind": "trend_recovery", "timeframe": "1h",
+            "recovery_trigger": "ema",
+        }, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["recovery_trigger"], "ema")
+
+    def test_trend_recovery_rejects_other_timeframes_and_triggers(self):
+        for payload in (
+            {"timeframe": "4h"},
+            {"timeframe": "1h", "recovery_trigger": "wma"},
+        ):
+            with self.subTest(payload=payload):
+                response = self.client.post("/api/alerts/", {
+                    "symbol": "BTCUSDT", "kind": "trend_recovery", **payload,
+                }, format="json")
+                self.assertEqual(response.status_code, 400)
+
+
+class TrendRecoveryCheckerTests(TestCase):
+    HOUR_START = 1_700_000_000
+
+    def _hour_bars(self, count):
+        return [
+            {"time": self.HOUR_START + index * 3600, "close": 100 + index}
+            for index in range(count)
+        ]
+
+    def _recovery_event(self, bar_time, stage="confirmed", direction="bullish"):
+        return {
+            "bar_time": bar_time, "direction": direction, "stage": stage,
+            "macd": 0.5, "close": 105.0, "daily_macd": 1.0, "h4_macd": 0.5,
+            "pullback_bars": 5,
+        }
+
+    @patch("alerts.recovery.detect_events")
+    @patch("alerts.recovery.trend_signs", return_value=[(0, 1.0)])
+    def test_checker_arms_then_fires_each_cycle_once(self, _signs, detect_events):
+        alert = Alert.objects.create(
+            symbol="BTCUSDT", kind=Alert.Kind.TREND_RECOVERY,
+            condition=Alert.Condition.CROSS, timeframe="1h",
+            frequency=Alert.Frequency.EVERY,
+        )
+        candles = {
+            "1h": self._hour_bars(3),
+            "4h": [{"time": 0, "close": 1}],
+            "1d": [{"time": 0, "close": 1}],
+        }
+
+        with patch("alerts.services._closed_bars",
+                   side_effect=lambda s, t, e, l: candles[t]):
+            detect_events.return_value = []
+            check_recovery_alerts()
+            alert.refresh_from_db()
+            self.assertIsNotNone(alert.recovery_last_bar_time)
+            self.assertEqual(TriggerEvent.objects.count(), 0)
+
+            # Two new closed bars arrive carrying an early warning and a confirmation.
+            candles["1h"] = self._hour_bars(5)
+            new_close = candles["1h"][-1]["time"] + 3600
+            detect_events.return_value = [
+                self._recovery_event(new_close - 3600, stage="early"),
+                self._recovery_event(new_close, stage="confirmed"),
+            ]
+            check_recovery_alerts()
+
+            titles = list(TriggerEvent.objects.order_by("id").values_list("title", flat=True))
+            self.assertEqual(titles, [
+                "BTCUSDT Trend Recovery - Bullish Early Warning",
+                "BTCUSDT Trend Recovery - Bullish Pullback Recovery",
+            ])
+            event = TriggerEvent.objects.get(title=titles[1])
+            self.assertIn("Status: Confirmed - Bullish pullback recovery", event.message)
+            self.assertIn("Trigger: SMA 3/10 (1h)", event.message)
+            self.assertIn("MACD 1d (EMA 19/39): 1.00", event.message)
+            alert.refresh_from_db()
+            self.assertIsNotNone(alert.last_triggered_at)
+            self.assertTrue(alert.active)
+
+            # The same bars evaluated again must not duplicate the cycle's events.
+            check_recovery_alerts()
+            self.assertEqual(TriggerEvent.objects.count(), 2)
+
+    @patch("alerts.recovery.detect_events")
+    @patch("alerts.recovery.trend_signs", return_value=[(0, 1.0)])
+    def test_once_alert_deactivates_on_confirmed_recovery(self, _signs, detect_events):
+        alert = Alert.objects.create(
+            symbol="BTCUSDT", kind=Alert.Kind.TREND_RECOVERY,
+            condition=Alert.Condition.CROSS, timeframe="1h",
+            frequency=Alert.Frequency.ONCE,
+        )
+        candles = {
+            "1h": self._hour_bars(3),
+            "4h": [{"time": 0, "close": 1}],
+            "1d": [{"time": 0, "close": 1}],
+        }
+
+        with patch("alerts.services._closed_bars",
+                   side_effect=lambda s, t, e, l: candles[t]):
+            detect_events.return_value = []
+            check_recovery_alerts()
+            candles["1h"] = self._hour_bars(4)
+            new_close = candles["1h"][-1]["time"] + 3600
+            detect_events.return_value = [self._recovery_event(new_close)]
+            check_recovery_alerts()
+
+        alert.refresh_from_db()
+        self.assertFalse(alert.active)
+
+    def test_check_alerts_skips_trend_recovery_kind(self):
+        Alert.objects.create(
+            symbol="BTCUSDT", kind=Alert.Kind.TREND_RECOVERY,
+            condition=Alert.Condition.CROSS, timeframe="1h",
+        )
+        with patch("alerts.services._closed_bars") as closed_bars:
+            check_alerts()
+        closed_bars.assert_not_called()
+
+

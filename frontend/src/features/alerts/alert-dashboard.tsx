@@ -5,7 +5,7 @@ import { api, readableError } from "@/lib/api/client";
 import { reportUrlFromMessage, messageWithoutReport } from "@/lib/alerts";
 import MarketWorkspace from "@/features/market/market-workspace";
 import AppSidebar from "@/components/layout/app-sidebar";
-import type { AlertItem, AlertKind, EventItem, ToastItem } from "@/types/alerts";
+import type { AlertItem, AlertKind, EventItem, RecoveryTrigger, ToastItem } from "@/types/alerts";
 import type { Drawing, Exchange } from "@/types/market";
 import {
   contextTimeframes, defaultRsiSettings, timeframes,
@@ -40,6 +40,7 @@ export default function AlertDashboard() {
   const [trendEnabled, setTrendEnabled] = useState(true);
   const [trendPeriod, setTrendPeriod] = useState("100");
   const [patternTimeframe, setPatternTimeframe] = useState<(typeof timeframes)[number]>("1h");
+  const [recoveryTrigger, setRecoveryTrigger] = useState<RecoveryTrigger>("sma");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [notificationAvailable, setNotificationAvailable] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -243,6 +244,10 @@ export default function AlertDashboard() {
       if (trendEnabled) payload.trend_period = Number(trendPeriod);
       const errors = macdFieldErrors({ rsiEnabled, rsi: rsiSettings, trendEnabled, trendPeriod });
       if (Object.keys(errors).length) { setFieldErrors(errors); setBusy(false); return; }
+    } else if (kind === "trend_recovery") {
+      payload.timeframe = "1h";
+      payload.condition = "cross";
+      payload.recovery_trigger = recoveryTrigger;
     } else {
       payload.timeframe = patternTimeframe;
     }
@@ -261,7 +266,7 @@ export default function AlertDashboard() {
     setRsiTimeframe("1h"); setTrendTimeframe("1h");
     setRsiEnabled(true); setRsiSettings(defaultRsiSettings);
     setTrendEnabled(true); setTrendPeriod("100");
-    setPatternTimeframe("1h"); setFieldErrors({});
+    setPatternTimeframe("1h"); setRecoveryTrigger("sma"); setFieldErrors({});
   }
 
   async function toggleAlert(item: AlertItem) {
@@ -322,6 +327,7 @@ export default function AlertDashboard() {
     return parts.join("");
   })();
   const patternSummary = `Watch the last 50 ${patternTimeframe} candles of ${marketSymbol || "the selected pair"} for a chart pattern. Notify while a shape is forming with the entry, invalidation and target it pins, then again when a completed candle closes through that entry at the same target.`;
+  const recoverySummary = `Watch ${marketSymbol || "the selected pair"} on closed 1h candles. When the 1D EMA 19/39 and 4H EMA 12/26 MACDs agree on the trend, warn early as the 1h MACD (${recoveryTrigger === "ema" ? "EMA 12/100" : "SMA 3/10"}) recovers from a 3+ bar pullback through zero, then confirm on the zero-line cross. Bullish recoveries and bearish reversals are tracked as separate cycles.`;
   const formModel: AlertFormModel = {
     kind,
     onKindChange: setKind,
@@ -349,7 +355,10 @@ export default function AlertDashboard() {
     onTrendPeriodChange: setTrendPeriod,
     patternTimeframe,
     onPatternTimeframeChange: setPatternTimeframe,
+    recoveryTrigger,
+    onRecoveryTriggerChange: setRecoveryTrigger,
     patternSummary,
+    recoverySummary,
     fieldErrors,
     busy,
     macdSummary,
