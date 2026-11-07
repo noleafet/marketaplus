@@ -2,7 +2,7 @@ import type { Exchange, Preferences, Timeframe } from "@/types/market";
 
 /** Public REST bases — market data is read straight from the exchange in the browser. */
 export const exchangeBases: Record<Exchange, string> = {
-  binance: "https://data-api.binance.vision/api/v3",
+  binance: "https://www.binance.com/fapi/v1",
   bybit: "https://api.bybit.com/v5/market",
 };
 

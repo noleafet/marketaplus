@@ -45,7 +45,7 @@ class Exchange(models.Model):
 
     exchange = models.CharField(max_length=12, choices=Name.choices, default=Name.BINANCE)
     exchange_url = models.URLField(
-        default="https://data-api.binance.vision/api/v3",
+        default="https://www.binance.com/fapi/v1",
         help_text="Base REST API URL for market data (without a trailing slash).",
     )
     exchange_timeout = models.PositiveIntegerField(

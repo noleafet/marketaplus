@@ -65,7 +65,7 @@ class Migration(migrations.Migration):
             fields=[
                 ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
                 ("exchange", models.CharField(choices=[("binance", "Binance"), ("bybit", "Bybit")], default="binance", max_length=12)),
-                ("exchange_url", models.URLField(default="https://data-api.binance.vision/api/v3", help_text="Base REST API URL for market data (without a trailing slash).")),
+                ("exchange_url", models.URLField(default="https://www.binance.com/fapi/v1", help_text="Base REST API URL for market data (without a trailing slash).")),
                 ("exchange_timeout", models.PositiveIntegerField(default=10, help_text="Timeout in seconds for exchange and Telegram HTTP requests.", validators=[django.core.validators.MinValueValidator(1)])),
             ],
         ),

@@ -802,7 +802,7 @@ class AppConfigurationTests(TestCase):
         self.assertEqual(configuration.alert_poll_seconds, 5)
 
         exchange = Exchange.load()
-        self.assertEqual(exchange.exchange_url, "https://data-api.binance.vision/api/v3")
+        self.assertEqual(exchange.exchange_url, "https://www.binance.com/fapi/v1")
         self.assertEqual(exchange.exchange_timeout, 10)
         exchange.exchange_url = "https://example.test/api"
         exchange.exchange_timeout = 4
@@ -1818,8 +1818,9 @@ class PatternStateMachineTests(SimpleTestCase):
     """The alert's own transitions, tested apart from the database and the exchange."""
 
     def forming_case(self):
+        # Fully drawn: the right shoulder printed at bar 34, only the neckline break is missing.
         bars = pattern_anchors(
-            [[0, 102], [8, 105], [14, 100], [20, 112], [30, 100], [34, 104]], 35,
+            [[0, 102], [8, 105], [14, 100], [20, 112], [30, 100], [34, 104], [38, 102]], 39,
         )
         return bars, only_pattern(["head_and_shoulders"], bars)
 
@@ -1838,7 +1839,7 @@ class PatternStateMachineTests(SimpleTestCase):
         self.assertEqual(state["key"], "head_and_shoulders")
         self.assertAlmostEqual(state["entry"]["price"], 99.75, places=10)
         self.assertEqual(state["entry"]["side"], "down")
-        self.assertEqual(state["entry"]["anchor_time"], pattern_time(34))
+        self.assertEqual(state["entry"]["anchor_time"], pattern_time(38))
         self.assertAlmostEqual(state["invalidation"]["price"], 112.25, places=10)
         # The engine calls the head an "above" level; the alert stores it as the same kind of
         # crossing test as the entry, so one helper decides both.
@@ -1853,6 +1854,20 @@ class PatternStateMachineTests(SimpleTestCase):
 
         self.assertEqual(signals, [])
         self.assertEqual(state["state"], "forming")
+
+    def test_a_shape_still_missing_its_right_shoulder_does_not_warn(self):
+        bars = pattern_anchors(
+            [[0, 102], [8, 105], [14, 100], [20, 112], [30, 100], [34, 104]], 35,
+        )
+        match = only_pattern(["head_and_shoulders"], bars)
+        self.assertEqual(match["stage"], "missing_swing")
+
+        signals, state = self.evaluate(bars, match)
+
+        self.assertEqual(signals, [])
+        self.assertEqual(state["state"], "idle")
+        # Nothing is remembered, so the completed shape can still warn later.
+        self.assertFalse(state["signature"])
 
     def test_a_two_sided_shape_waits_for_the_side_that_actually_breaks(self):
         bars = pattern_anchors(
@@ -1892,14 +1907,15 @@ class PatternStateMachineTests(SimpleTestCase):
 class PatternAlertTests(TestCase):
     """One alert, followed through the polls the scheduler would hand it."""
 
-    FORMING = [[0, 102], [8, 105], [14, 100], [20, 112], [30, 100], [34, 104]]
+    # Fully drawn head and shoulders: right shoulder at bar 34, neckline (99.75) not yet broken.
+    FORMING = [[0, 102], [8, 105], [14, 100], [20, 112], [30, 100], [34, 104], [38, 102]]
 
     def setUp(self):
         self.alert = Alert.objects.create(
             symbol="BTCUSDT", kind=Alert.Kind.PATTERN, condition=Alert.Condition.CROSS,
             timeframe="1h", frequency=Alert.Frequency.EVERY,
         )
-        self.forming = pattern_anchors(self.FORMING, 35)
+        self.forming = pattern_anchors(self.FORMING, 39)
 
     def extend(self, price, length):
         return pattern_anchors(self.FORMING + [[length - 1, price]], length)
@@ -1929,7 +1945,7 @@ class PatternAlertTests(TestCase):
         self.assertAlmostEqual(alert.pattern_target, 87.25, places=10)
         self.assertEqual(
             alert.pattern_last_bar_time,
-            utc_datetime.fromtimestamp(pattern_time(34), tz=dt_timezone.utc),
+            utc_datetime.fromtimestamp(pattern_time(38), tz=dt_timezone.utc),
         )
 
     def test_the_same_closed_bar_cannot_fire_again_on_the_next_poll(self):
@@ -1967,7 +1983,8 @@ class PatternAlertTests(TestCase):
     def test_a_shape_that_never_breaks_is_dropped_once_it_ages_out(self):
         self.poll(self.forming)
 
-        self.assertEqual(self.poll(self.extend(105, 68)), [])
+        # Pinned at bar 38; the forming window is 30 bars.
+        self.assertEqual(self.poll(self.extend(105, 70)), [])
         self.assertEqual(self.reload().pattern_state, Alert.PatternState.IDLE)
 
     def test_a_break_that_predates_the_alert_is_never_reported(self):
@@ -2173,20 +2190,28 @@ class PatternGeometryReviewTests(SimpleTestCase):
         self.assertTrue(match["forming"])
         self.assertEqual(match["bias"], "neutral")
 
-    def test_a_neckline_close_before_the_second_top_is_a_failure_not_a_breakout(self):
+    def test_a_half_formed_double_top_never_warns_or_breaks_out(self):
         forming_bars = pattern_anchors([[0, 92], [12, 96], [20, 100], [28, 90], [32, 95]], 33)
         match = only_pattern(["double_top"], forming_bars)
         self.assertEqual(match["stage"], "missing_swing")
         signals, state = pattern_evaluate(
             forming_bars, match, None, symbol="BTCUSDT", timeframe="1h",
         )
-        self.assertEqual([signal["event"] for signal in signals], ["forming"])
+        self.assertEqual(signals, [])
+        self.assertEqual(state["state"], "idle")
 
-        # Price slides through the reaction low without ever printing a second top.
+    def test_an_alert_pinned_before_the_second_top_fails_quietly_on_a_neckline_close(self):
+        # Alerts already forming from a half-drawn shape (pinned before this rule) must not
+        # report the neckline close as a breakout either.
+        from .patterns import _pin
+        forming_bars = pattern_anchors([[0, 92], [12, 96], [20, 100], [28, 90], [32, 95]], 33)
+        match = only_pattern(["double_top"], forming_bars)
+        state = {"state": "forming", "key": "", "bias": "", "signature": "", "entry": {},
+                 "target": None, "invalidation": {}, "end_time": None}
+        _pin(state, match, symbol="BTCUSDT", timeframe="1h", last_time=forming_bars[-1]["time"])
+        self.assertIs(state["entry"]["needs_swing"], True)
+
         slid = pattern_anchors([[0, 92], [12, 96], [20, 100], [28, 90], [32, 95], [40, 84]], 41)
-        self.assertFalse(any(
-            found["stage"] != "missing_swing" for found in detect_patterns(["double_top"], slid)
-        ))
         signals, state = pattern_evaluate(
             slid, best_pattern(detect_patterns(list(DETECTED_PATTERN_KEYS), slid)), state,
             symbol="BTCUSDT", timeframe="1h",
@@ -2194,3 +2219,69 @@ class PatternGeometryReviewTests(SimpleTestCase):
         self.assertEqual(signals, [])
         self.assertEqual(state["state"], "idle")
         self.assertIsNone(state["target"])
+
+class PatternAlertMissingSwingTests(TestCase):
+    """The half-formed-shape rule, followed through the scheduler job and the database."""
+
+    def setUp(self):
+        self.alert = Alert.objects.create(
+            symbol="BTCUSDT", kind=Alert.Kind.PATTERN, condition=Alert.Condition.CROSS,
+            timeframe="1h", frequency=Alert.Frequency.EVERY,
+        )
+
+    def poll(self, bars):
+        with patch("alerts.services._closed_bars", return_value=bars):
+            return check_pattern_alerts()
+
+    def test_a_half_formed_double_top_sends_nothing_even_when_it_slides(self):
+        self.assertEqual(self.poll(pattern_anchors(
+            [[0, 92], [12, 96], [20, 100], [28, 90], [32, 95]], 33,
+        )), [])
+        self.assertEqual(self.poll(pattern_anchors(
+            [[0, 92], [12, 96], [20, 100], [28, 90], [32, 95], [40, 84]], 41,
+        )), [])
+        self.alert.refresh_from_db()
+        self.assertEqual(self.alert.pattern_state, Alert.PatternState.IDLE)
+        self.assertEqual(TriggerEvent.objects.filter(alert=self.alert).count(), 0)
+
+    def test_the_completed_shape_warns_and_then_reports_its_breakout(self):
+        # Half drawn: nothing yet.
+        self.assertEqual(self.poll(pattern_anchors(
+            [[0, 92], [12, 96], [20, 100], [28, 90], [32, 95]], 33,
+        )), [])
+        # The second top prints at 100 on bar 36 and price turns down: now it warns.
+        forming = self.poll(pattern_anchors(
+            [[0, 92], [12, 96], [20, 100], [28, 90], [36, 100], [40, 96]], 41,
+        ))
+        self.assertEqual(len(forming), 1)
+        self.assertIn("Pattern - Forming - Double Top", forming[0].title)
+        self.alert.refresh_from_db()
+        self.assertIs(self.alert.pattern_entry["needs_swing"], False)
+
+        broke = self.poll(pattern_anchors(
+            [[0, 92], [12, 96], [20, 100], [28, 90], [36, 100], [40, 96], [44, 88]], 45,
+        ))
+
+        self.assertEqual(len(broke), 1)
+        self.assertIn("Pattern - Breakout - Double Top", broke[0].title)
+        self.alert.refresh_from_db()
+        self.assertEqual(self.alert.pattern_state, Alert.PatternState.IDLE)
+
+class PatternBreakoutTargetTests(SimpleTestCase):
+    def test_a_sloped_neckline_breakout_measures_its_target_from_the_break(self):
+        # Found replaying live ETHUSDT 1d candles: an inverse head and shoulders pinned its target
+        # at 4231 while forming, the rising neckline then broke at 4673, and the breakout quoted
+        # a "bullish" target below its own entry.
+        bars = pattern_anchors([[0, 100], [20, 100], [21, 160]], 22)
+        state = {
+            "state": "forming", "key": "inverse_head_and_shoulders", "bias": "bullish",
+            "signature": "s", "end_time": bars[0]["time"], "target": 105.0, "invalidation": {},
+            "entry": {"side": "up", "price": 100.0, "slope": 2.0, "anchor_time": bars[0]["time"],
+                      "needs_swing": False, "height": 5.0},
+        }
+
+        signals, state = pattern_evaluate(bars, None, state, symbol="ETHUSDT", timeframe="1d")
+
+        self.assertEqual([signal["event"] for signal in signals], ["breakout"])
+        self.assertAlmostEqual(signals[0]["level"], 142.0, places=10)
+        self.assertAlmostEqual(state["target"], 147.0, places=10)

@@ -721,8 +721,9 @@ def _pattern_event_title(alert, signal, state):
 def _pattern_alert_message(alert, signal, state):
     """Forming and breakout copy for a chart-pattern alert.
 
-    Both events close on the same ``Target:`` number so the pair reads as one trade plan, and
-    every line is ``Label: value`` so Telegram bolds the label and folds the report into a link.
+    Both events quote the same measured move: on a flat line that is the same ``Target:`` number,
+    on a sloped one the breakout re-applies it from where the line was broken. Every line
+    is ``Label: value`` so Telegram bolds the label and folds the report into a link.
     """
     label = PATTERN_LABELS.get(state["key"], state["key"])
     forming = signal["event"] == "forming"

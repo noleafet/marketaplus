@@ -823,7 +823,10 @@ def _pin(state, match, *, symbol, timeframe, last_time):
         "end_time": match["end_time"],
         "entry": {**_pinned(level, last_time),
                   # The neckline only confirms a shape whose last swing has printed.
-                  "needs_swing": match.get("stage") == "missing_swing"},
+                  "needs_swing": match.get("stage") == "missing_swing",
+                  # The measured move, so the breakout can apply it from wherever a sloped
+                  # line has drifted to by the time price actually breaks it.
+                  "height": abs(level["target"] - level["price"])},
         "target": level["target"],
         "invalidation": _pinned_invalidation(match["invalidation"], last_time),
     })
@@ -841,8 +844,8 @@ def pattern_evaluate(bars, match, state, *, symbol, timeframe, first_poll=False)
 
     Returns ``(signals, state)`` and never produces more than one event per call, because the
     caller only advances on a newly closed bar. A forming match pins its entry, target and
-    invalidation; the entry event repeats the pinned target, and a shape that breaks against
-    its invalidation or ages out of the forming window is dropped silently.
+    invalidation; the entry event applies the pinned measured move from the break, and a shape
+    that breaks against its invalidation or ages out of the forming window is dropped silently.
 
     A match that arrives already confirmed arms without alerting on the first poll: the break
     happened before anyone was watching, so reporting it would be a stale trade. A later poll
@@ -865,12 +868,17 @@ def pattern_evaluate(bars, match, state, *, symbol, timeframe, first_poll=False)
             # shape failed rather than broke out, so it is dropped without an alert.
             return [], {**state, "state": "idle", "entry": {}, "invalidation": {}, "target": None}
         if broke is not None:
-            # The target survives the transition because the entry event repeats it; a shape
-            # that fails instead has nothing left to aim at.
+            level = entry["price"] + entry["slope"] * ((broke["time"] - entry["anchor_time"]) / step)
+            # The measured move runs from the break. On a flat line that is the number the
+            # warning already quoted; on a sloped one the line has moved since, and a target
+            # pinned at the warning could even end up behind the breakout.
+            target = state.get("target")
+            if entry.get("height") is not None:
+                target = level + entry["height"] if entry["side"] == "up" else level - entry["height"]
             return (
                 [{"event": "breakout", "bar_time": broke["time"], "close": broke["close"],
-                  "level": entry["price"] + entry["slope"] * ((broke["time"] - entry["anchor_time"]) / step)}],
-                {**state, "state": "idle", "entry": {}, "invalidation": {}},
+                  "level": level}],
+                {**state, "state": "idle", "entry": {}, "invalidation": {}, "target": target},
             )
         invalidation = state.get("invalidation") or {}
         if invalidation and first_close_past(
@@ -887,6 +895,12 @@ def pattern_evaluate(bars, match, state, *, symbol, timeframe, first_poll=False)
 
     signature = _formation_signature(symbol, timeframe, match)
     if signature == state.get("signature"):
+        return [], state
+    if match["forming"] and match.get("stage") == "missing_swing":
+        # A second top or right shoulder that has not printed is a guess, and on live candles
+        # about half of those guesses never complete. The warning waits until the shape is fully
+        # drawn and only the neckline break is missing; the chart still shows the projection.
+        # Nothing is remembered, so the completed shape (a new signature) can still warn.
         return [], state
     if match["forming"]:
         _pin(state, match, symbol=symbol, timeframe=timeframe, last_time=last_time)
