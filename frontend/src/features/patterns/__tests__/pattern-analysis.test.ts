@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PatternBar } from "../pattern-analysis";
-import { bestPattern, detectPatterns } from "../pattern-analysis";
+import { bestPattern, detectPatterns, prioritizePatterns } from "../pattern-analysis";
 
 const START = 1_700_000_000;
 const HOUR = 3600;
@@ -53,8 +53,11 @@ describe("detectPatterns", () => {
     const roles = new Set(match.segments.map((segment) => segment.role));
     expect(roles.has("outline")).toBe(true);
     expect(roles.has("boundary")).toBe(true);
-    // Every retained point is inside the chart's price range (plus the 25% margin).
-    for (const segment of match.segments) {
+    // Trade levels are kept even when the measured target projects outside the visible margin.
+    expect(roles.has("entry")).toBe(true);
+    expect(roles.has("target")).toBe(true);
+    // Every retained geometry point except entry/target is inside the chart's price range.
+    for (const segment of match.segments.filter((item) => item.role !== "entry" && item.role !== "target")) {
       for (const point of [segment.from, segment.to]) {
         expect(point.price).toBeGreaterThanOrEqual(94.875 - 0.25 * 15.625);
         expect(point.price).toBeLessThanOrEqual(110.5 + 0.25 * 15.625);
@@ -88,15 +91,30 @@ describe("detectPatterns", () => {
   });
 });
 
-describe("bestPattern", () => {
-  it("prefers a confirmed shape over a forming one, then the wider structure", () => {
+describe("pattern priority", () => {
+  function widened(match: ReturnType<typeof detectPatterns>[number], key: "head_and_shoulders" | "double_bottom") {
+    const first = match.segments[0];
+    return {
+      ...match,
+      key,
+      segments: [
+        { from: { time: first.from.time - HOUR, price: first.from.price }, to: first.from, role: "boundary" as const },
+        ...match.segments,
+      ],
+    };
+  }
+
+  it("prioritizes forming shapes, then the wider structure", () => {
     const [confirmed] = detectPatterns(["double_top"], doubleTopBars());
     const forming = { ...confirmed, forming: true, key: "double_bottom" as const };
-    const wider = { ...confirmed, key: "head_and_shoulders" as const };
-    expect(bestPattern([forming, confirmed])).toBe(confirmed);
+    const widerConfirmed = widened(confirmed, "head_and_shoulders");
+    const widerForming = widened(forming, "head_and_shoulders");
+
+    expect(bestPattern([confirmed, forming])).toBe(forming);
+    expect(bestPattern([confirmed, widerConfirmed])).toBe(widerConfirmed);
+    expect(bestPattern([forming, widerForming])).toBe(widerForming);
+    expect(prioritizePatterns([confirmed, forming]).map((match) => match.key)).toEqual(["double_bottom", "double_top"]);
     expect(bestPattern([forming])).toBe(forming);
     expect(bestPattern([])).toBeNull();
-    // Equal status: both spans come from the same geometry, so the stable sort keeps the first.
-    expect(bestPattern([confirmed, wider])).toBe(confirmed);
   });
 });

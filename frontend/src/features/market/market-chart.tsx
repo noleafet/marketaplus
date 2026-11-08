@@ -29,7 +29,7 @@ import {
 } from "@/features/candlesticks/patterns";
 import PatternGuide from "@/features/patterns/components/pattern-guide";
 import {
-  bestPattern, detectPatterns, patternChoices, patternFileName,
+  bestPattern, detectPatterns, patternChoices, patternFileName, prioritizePatterns,
   type PatternBar, type PatternMatch,
 } from "@/features/patterns/pattern-analysis";
 import { matchName, paintPattern, paintPatternCaption } from "@/features/patterns/paint-pattern";
@@ -1339,7 +1339,7 @@ export default function MarketChart({
     // Nothing to measure means the chart is still between pairs or intervals, which is not the
     // same as finding no pattern in the bars that are loaded.
     if (!recent.length) { setPatternNote(`Loading ${symbol} on ${timeframe.toUpperCase()}… try again in a moment.`); return; }
-    const matches = detectPatterns(PATTERN_KEYS, recent);
+    const matches = prioritizePatterns(detectPatterns(PATTERN_KEYS, recent));
     if (!matches.length) {
       setPatternNote(`None of the patterns matched the latest ${PATTERN_RECENT_BARS} candles. Try another timeframe.`);
       return;

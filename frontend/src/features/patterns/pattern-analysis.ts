@@ -10,8 +10,8 @@
  * a double top without its second top, and triangles or flags still inside their channel are
  * marked `forming`: the missing swing is returned as a `projection` segment, the level that
  * confirms the shape as a `trigger` segment, and the measured target is measured from the
- * geometry that is actually on the chart. A completed shape always wins over a partial one for
- * the same pattern, so a forming match never shadows a real one.
+ * geometry that is actually on the chart. Within one detector a completed shape still wins over a
+ * partial one, but callers rank matches with forming shapes first because they are the live setup.
  */
 
 export type PatternKey =
@@ -845,14 +845,19 @@ function patternSpan(match: PatternMatch) {
 }
 
 /**
- * Picks the most useful match for the chart overlay when Auto finds several. Confirmed shapes
- * beat partial ones, and among equals the widest structure wins: a descending triangle should not
- * lose its place to a small double top that is only one part of it.
+ * Picks the most useful match for the chart overlay and exports when several are found. A
+ * forming shape is the live setup, so it always beats a completed one; among equals the widest
+ * structure wins, since a small double top should not hide a larger channel.
  */
-export function bestPattern(matches: readonly PatternMatch[]): PatternMatch | null {
+export function prioritizePatterns(matches: readonly PatternMatch[]): PatternMatch[] {
   return [...matches].sort((a, b) =>
-    Number(a.forming) - Number(b.forming) || patternSpan(b) - patternSpan(a),
-  )[0] ?? null;
+    Number(b.forming) - Number(a.forming) || patternSpan(b) - patternSpan(a),
+  );
+}
+
+/** The single highest-priority reading for the chart overlay. */
+export function bestPattern(matches: readonly PatternMatch[]): PatternMatch | null {
+  return prioritizePatterns(matches)[0] ?? null;
 }
 
 /**
@@ -876,12 +881,18 @@ export function detectPatterns(keys: readonly PatternKey[], bars: PatternBar[]):
     const floor = range.low - 0.25 * range.span;
     const ceiling = range.high + 0.25 * range.span;
     const inside = (point: { price: number }) => point.price >= floor && point.price <= ceiling;
+    // Entry and target are the tradeable output, so they and their captions stay even when
+    // projected outside the visible margin; the painter clips them to the candle pane.
+    const tradeLevel = (segment: (typeof built.segments)[number]) =>
+      segment.role === "entry" || segment.role === "target";
+    const tradeLabel = (label: (typeof built.labels)[number]) =>
+      label.text.startsWith("Entry ") || label.text.startsWith("Target");
     return [{
       ...built,
       label: choice.label,
-      segments: built.segments.filter((segment) => inside(segment.from) && inside(segment.to)),
+      segments: built.segments.filter((segment) => tradeLevel(segment) || (inside(segment.from) && inside(segment.to))),
       markers: built.markers.filter(inside),
-      labels: built.labels.filter(inside),
+      labels: built.labels.filter((label) => inside(label) || tradeLabel(label)),
     }];
   });
   return found;

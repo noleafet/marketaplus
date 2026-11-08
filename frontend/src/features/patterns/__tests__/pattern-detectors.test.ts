@@ -108,8 +108,12 @@ describe("head and shoulders family", () => {
     expect(match.invalidation).toContain("95.75");
     const troughs = match.markers.filter((marker) => marker.kind === "trough");
     expect(troughs.map((trough) => trough.price)).toEqual([104.75, 95.75, 104.75]);
-    // The measured move is above the range, so it is named in the summary but not drawn.
+    // The measured move is above the range, so it stays as a projected target line rather than
+    // being filtered away with the rest of the off-screen geometry.
     expect(match.summary).toMatch(/target 124\.75/);
+    expect(segmentRole(match, "target")).toBeDefined();
+    expect(match.segments.some((segment) => segment.role === "entry")).toBe(true);
+    expect(match.labels.map((label) => label.text)).toEqual(expect.arrayContaining(["Target"]));
   });
 });
 
