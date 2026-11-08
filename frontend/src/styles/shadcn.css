@@ -1005,6 +1005,84 @@ footer {
   overflow: hidden;
 }
 
+.chart-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 1.25rem 0;
+}
+
+.chart-tabs-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.125rem;
+  padding: 0.1875rem;
+  border-radius: calc(var(--radius));
+  background: hsl(var(--muted));
+}
+
+.chart-tab {
+  display: flex;
+  align-items: center;
+  border-radius: calc(var(--radius) - 3px);
+}
+
+.chart-tab.active {
+  background: hsl(var(--background));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+}
+
+.chart-tab-name {
+  padding: 0.3rem 0.4rem 0.3rem 0.6rem;
+  border: 0;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font: 500 11px var(--font-sans);
+  letter-spacing: 0.02em;
+}
+
+.chart-tab.active .chart-tab-name {
+  color: hsl(var(--foreground));
+}
+
+.chart-tab-name:hover {
+  color: hsl(var(--foreground));
+}
+
+.chart-tab-close {
+  padding: 0.3rem 0.45rem;
+  border: 0;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font: 500 11px var(--font-sans);
+  line-height: 1;
+}
+
+.chart-tab-close:hover {
+  color: hsl(var(--foreground));
+}
+
+.chart-tab-notice {
+  margin: 0;
+  color: hsl(var(--muted-foreground));
+  font: 400 11px var(--font-sans);
+}
+
+.chart-tab-pane[hidden] {
+  display: none;
+}
+
+.chart-tab-empty {
+  padding: 3rem 1.25rem;
+  color: hsl(var(--muted-foreground));
+  text-align: center;
+}
+
+.chart-tab-empty p {
+  margin: 0.25rem 0 0;
+  font-size: 12px;
+}
+
 .market-head {
   min-height: auto;
   padding: 1rem 1.25rem 0.75rem;

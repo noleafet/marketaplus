@@ -1,4 +1,3 @@
-import type { FormEvent } from "react";
 import { fmt } from "@/lib/format";
 import { intervals } from "@/types/market";
 import type { Exchange, MarketEvent, Timeframe } from "@/types/market";
@@ -13,11 +12,8 @@ type Props = {
   dayChange: number | null;
   events: MarketEvent[];
   timeframe: Timeframe;
-  draft: string;
   onExchangeChange?: (exchange: Exchange) => void;
   onTimeframeChange: (timeframe: Timeframe) => void;
-  onDraftChange: (value: string) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
 const CONNECTION_TITLES = {
@@ -34,11 +30,8 @@ export default function MarketHeader({
   dayChange,
   events,
   timeframe,
-  draft,
   onExchangeChange,
   onTimeframeChange,
-  onDraftChange,
-  onSubmit,
 }: Props) {
   return (
     <div className="market-head">
@@ -85,18 +78,6 @@ export default function MarketHeader({
             </button>
           ))}
         </div>
-        <form className="chart-symbol" onSubmit={onSubmit}>
-          <span>PAIR</span>
-          <input
-            aria-label="Market symbol"
-            value={draft}
-            maxLength={24}
-            onChange={(event) =>
-              onDraftChange(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))
-            }
-          />
-          <button type="submit">Go</button>
-        </form>
       </div>
     </div>
   );
