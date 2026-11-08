@@ -101,11 +101,11 @@ export default function AlertForm({ model, onSubmit }: Props) {
         <button className={kind === "macd" ? "selected" : ""} onClick={() => onKindChange("macd")}>
           MACD cross
         </button>
-        <button className={kind === "pattern" ? "selected" : ""} onClick={() => onKindChange("pattern")}>
-          Pattern forming
-        </button>
         <button className={kind === "trend_recovery" ? "selected" : ""} onClick={() => onKindChange("trend_recovery")}>
           Trend Recovery
+        </button>
+        <button className={kind === "pattern" ? "selected" : ""} onClick={() => onKindChange("pattern")}>
+          Pattern forming
         </button>
       </div>
       <form onSubmit={onSubmit} className="alert-form">
