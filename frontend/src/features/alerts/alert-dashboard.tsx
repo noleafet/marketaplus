@@ -391,7 +391,7 @@ export default function AlertDashboard() {
         />
 
         <main id="main-content" className="flex-1 px-4 py-5 md:px-6 md:py-6">
-          <div className="flex w-full flex-col gap-5">
+          <div className="flex w-full flex-col gap-0">
             <MarketWorkspace
               symbol={marketSymbol}
               exchange={exchange}
@@ -413,24 +413,26 @@ export default function AlertDashboard() {
               </div>
             )}
 
-            <div className="content-grid dashboard-grid">
-              <AlertForm model={formModel} onSubmit={createAlert} />
-              <AlertList
-                alerts={alerts}
-                refreshing={refreshing}
-                notificationAvailable={notificationAvailable}
-                notificationsGranted={notificationsGranted}
-                onRefresh={() => void refresh()}
-                onEnableNotifications={requestNotifications}
-                onToggle={(item) => void toggleAlert(item)}
-                onDelete={(id) => void deleteAlert(id)}
-              />
-              <ActivityLog
-                events={events}
-                clearedThrough={clearedThrough}
-                onClear={clearLog}
-              />
-            </div>
+            <section className="alerts-group" aria-label="Alerts">
+              <div className="content-grid dashboard-grid">
+                <AlertForm model={formModel} onSubmit={createAlert} />
+                <AlertList
+                  alerts={alerts}
+                  refreshing={refreshing}
+                  notificationAvailable={notificationAvailable}
+                  notificationsGranted={notificationsGranted}
+                  onRefresh={() => void refresh()}
+                  onEnableNotifications={requestNotifications}
+                  onToggle={(item) => void toggleAlert(item)}
+                  onDelete={(id) => void deleteAlert(id)}
+                />
+                <ActivityLog
+                  events={events}
+                  clearedThrough={clearedThrough}
+                  onClear={clearLog}
+                />
+              </div>
+            </section>
 
             <footer className="flex flex-col gap-2 border-t pt-6 pb-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
               <span>Marketa+ © 2026</span>

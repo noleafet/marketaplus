@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { API, readJson } from "@/lib/api/client";
 import {
   CLEAR_ARM_MS, KEPT_PER_SYMBOL, defaultPreferences, exchangeName,
@@ -30,6 +31,10 @@ const WATCH_METRIC_MS = 60000;
 /** Quotes are cheaper batched, so the whole watchlist plus open tabs refresh in one request. */
 const QUOTE_REFRESH_MS = 10000;
 const TAB_STORAGE_KEY = "tradechart.tabs";
+/** Drag-resize bounds for the chart column; the side column keeps at least MIN_SIDE_WIDTH. */
+const CHART_WIDTH_KEY = "tradechart.chart-width";
+const MIN_CHART_WIDTH = 560;
+const MIN_SIDE_WIDTH = 340;
 
 /**
  * The market section shell: the tab strip, one mounted MarketChart per open pair, and the shared
@@ -77,6 +82,10 @@ export default function MarketWorkspace({
   const [candlestickClearArmed, setCandlestickClearArmed] = useState<string | null>(null);
   const [candlestickClearing, setCandlestickClearing] = useState<string | null>(null);
   const candlestickArmRef = useRef<HTMLButtonElement | null>(null);
+  /** Chart column width in px while the resize handle is in use; null keeps the default split. */
+  const [chartWidth, setChartWidth] = useState<number | null>(null);
+  const marketSectionRef = useRef<HTMLElement | null>(null);
+  const resizeDrag = useRef<{ startX: number; startWidth: number; maxWidth: number } | null>(null);
 
   const activeTab = tabState.active || null;
   /** Readings count only while they describe the pair on screen; a stale report is ignored. */
@@ -191,6 +200,14 @@ export default function MarketWorkspace({
   useEffect(() => { setCandlestickClearArmed(null); }, [activeTab]);
   // A different pair on screen deselects whatever the previous chart had selected.
   useEffect(() => { setSelectedDrawing(null); }, [activeTab]);
+
+  // The saved chart width is read after mount so the prerendered markup stays storage-free.
+  useEffect(() => {
+    const saved = readSaved<number | null>(CHART_WIDTH_KEY, null);
+    if (typeof saved === "number" && saved >= MIN_CHART_WIDTH) {
+      setChartWidth(Math.round(saved));
+    }
+  }, []);
 
   const { removeDrawing, updateDrawing, clearTradeEntry } = drawingActions({
     drawings, setDrawings, selected: selectedDrawing, setSelected: setSelectedDrawing,
@@ -382,6 +399,58 @@ export default function MarketWorkspace({
     }
   }
 
+  /**
+   * The chart column's right edge carries the resize handle. Pointer capture keeps the drag
+   * alive outside the handle, and the px width lands on --chart-col, which only applies while
+   * the workspace is in its wide two-column layout.
+   */
+  function startChartResize(event: ReactPointerEvent<HTMLDivElement>) {
+    const section = marketSectionRef.current;
+    if (!section) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const gridWidth = section.parentElement?.getBoundingClientRect().width ?? Infinity;
+    resizeDrag.current = {
+      startX: event.clientX,
+      startWidth: section.getBoundingClientRect().width,
+      maxWidth: gridWidth - MIN_SIDE_WIDTH,
+    };
+  }
+  function moveChartResize(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = resizeDrag.current;
+    if (!drag) return;
+    const next = Math.round(
+      Math.min(Math.max(drag.startWidth + event.clientX - drag.startX, MIN_CHART_WIDTH), drag.maxWidth),
+    );
+    setChartWidth(next);
+  }
+  function endChartResize(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!resizeDrag.current) return;
+    resizeDrag.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    setChartWidth((width) => {
+      if (width !== null) {
+        try { localStorage.setItem(CHART_WIDTH_KEY, JSON.stringify(width)); }
+        catch { /* Storage can be unavailable. */ }
+      }
+      return width;
+    });
+  }
+  /** Arrow keys step the column 16px at a time, clamped like the pointer drag. */
+  function resizeChartByKey(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const section = marketSectionRef.current;
+    const gridWidth = section?.parentElement?.getBoundingClientRect().width ?? Infinity;
+    const current = chartWidth ?? section?.getBoundingClientRect().width ?? MIN_CHART_WIDTH;
+    const next = Math.round(
+      Math.min(Math.max(current + (event.key === "ArrowRight" ? 16 : -16), MIN_CHART_WIDTH), gridWidth - MIN_SIDE_WIDTH),
+    );
+    setChartWidth(next);
+    try { localStorage.setItem(CHART_WIDTH_KEY, JSON.stringify(next)); }
+    catch { /* Storage can be unavailable. */ }
+  }
+
   async function deletePatternShot(id: number) {
     try {
       const response = await fetch(`${API}/pattern-shots/${id}/`, { method: "DELETE", cache: "no-store" });
@@ -461,8 +530,17 @@ export default function MarketWorkspace({
   );
 
   return (
-    <div className="workspace-grid">
-      <section className="market panel" id="market">
+    <div
+      className="workspace-grid"
+      style={
+        {
+          "--chart-col": chartWidth
+            ? `min(${chartWidth}px, calc(100% - ${MIN_SIDE_WIDTH}px))`
+            : undefined,
+        } as CSSProperties
+      }
+    >
+      <section className="market panel" id="market" ref={marketSectionRef}>
         <ChartTabs
           tabs={tabState.tabs}
           active={activeTab}
@@ -501,6 +579,18 @@ export default function MarketWorkspace({
             <p>Select a pair from the watchlist to open its chart.</p>
           </div>
         )}
+        <div
+          className="workspace-resize"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize chart width"
+          tabIndex={0}
+          onKeyDown={resizeChartByKey}
+          onPointerDown={startChartResize}
+          onPointerMove={moveChartResize}
+          onPointerUp={endChartResize}
+          onPointerCancel={endChartResize}
+        />
       </section>
       <aside className="workspace-side">
         <WatchlistPanel

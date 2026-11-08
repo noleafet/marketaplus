@@ -155,13 +155,13 @@ footer {
 
 .content-grid {
   grid-template-columns: minmax(0, 1fr);
-  gap: 1rem;
+  gap: 0;
 }
 
 .dashboard-grid {
   grid-template-areas: "create alerts activity";
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1rem;
+  gap: 0;
   margin: 0;
   align-items: stretch;
 }
@@ -187,12 +187,59 @@ footer {
 }
 
 .workspace-grid {
-  gap: 1rem;
+  gap: 0;
   margin: 0;
 }
 
 .workspace-side {
+  gap: 0;
   margin-left: 0;
+}
+
+/* The chart column width is drag-resizable; --chart-col only applies while the
+   workspace keeps its wide two-column layout. */
+@media (min-width: 1261px) {
+  .workspace-grid {
+    grid-template-columns: var(--chart-col, minmax(0, 2fr)) minmax(0, 1fr);
+  }
+}
+
+.market {
+  position: relative;
+}
+
+.workspace-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 10px;
+  z-index: 6;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.workspace-resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 2px;
+  background: hsl(var(--border));
+  transition: background 0.15s ease;
+}
+
+.workspace-resize:hover::after,
+.workspace-resize:active::after,
+.workspace-resize:focus-visible::after {
+  background: var(--green);
+}
+
+@media (max-width: 1260px) {
+  .workspace-resize {
+    display: none;
+  }
 }
 
 .notice {
