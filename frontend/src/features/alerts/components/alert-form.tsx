@@ -348,32 +348,6 @@ export default function AlertForm({ model, onSubmit }: Props) {
             </div>
           </div>
         )}
-        {kind === "pattern" && (
-          <div className="macd-config">
-            <div className="config-row">
-              <label>
-                Timeframe
-                <select
-                  name="pattern_timeframe"
-                  value={patternTimeframe}
-                  onChange={(event) =>
-                    onPatternTimeframeChange(event.target.value as (typeof timeframes)[number])
-                  }
-                >
-                  {timeframes.map((timeframe) => (
-                    <option key={timeframe} value={timeframe}>
-                      {timeframe}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="macd-summary" aria-live="polite">
-              <b>This alert will</b>
-              <p>{patternSummary}</p>
-            </div>
-          </div>
-        )}
         {kind === "trend_recovery" && (
           <div className="macd-config">
             <div className="config-row">
@@ -404,6 +378,32 @@ export default function AlertForm({ model, onSubmit }: Props) {
             <div className="macd-summary" aria-live="polite">
               <b>This alert will</b>
               <p>{recoverySummary}</p>
+            </div>
+          </div>
+        )}
+        {kind === "pattern" && (
+          <div className="macd-config">
+            <div className="config-row">
+              <label>
+                Timeframe
+                <select
+                  name="pattern_timeframe"
+                  value={patternTimeframe}
+                  onChange={(event) =>
+                    onPatternTimeframeChange(event.target.value as (typeof timeframes)[number])
+                  }
+                >
+                  {timeframes.map((timeframe) => (
+                    <option key={timeframe} value={timeframe}>
+                      {timeframe}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="macd-summary" aria-live="polite">
+              <b>This alert will</b>
+              <p>{patternSummary}</p>
             </div>
           </div>
         )}

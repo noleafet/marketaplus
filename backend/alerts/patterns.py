@@ -199,7 +199,7 @@ def _price_text(value):
     return f"{value:,.{digits}f}".rstrip("0").rstrip(".")
 
 
-def _level(side, price, slope, target, bias, name):
+def _level(side, price, slope, target, bias, name, slack=0.0):
     return {
         "side": side,
         "price": price,
@@ -207,6 +207,9 @@ def _level(side, price, slope, target, bias, name):
         "target": target,
         "bias": bias,
         "name": name,
+        # How far past the line a close must land before it counts as a break; the
+        # convergence detector ignores overshoots smaller than this as noise.
+        "slack": slack,
     }
 
 
@@ -645,17 +648,21 @@ def _find_convergence(bars, swings, kind):
             # A symmetrical shape that has not picked a side is entered on either edge, and
             # neither edge invalidates a direction the shape has not taken.
             levels = [
-                _level("up", upper.at(last), upper.slope, up_target, "bullish", "resistance"),
-                _level("down", lower.at(last), lower.slope, down_target, "bearish", "support"),
+                _level("up", upper.at(last), upper.slope, up_target, "bullish", "resistance",
+                       slack=slack),
+                _level("down", lower.at(last), lower.slope, down_target, "bearish", "support",
+                       slack=slack),
             ]
             invalidation = None
         else:
             levels = [_level("up" if above else "down", price, line.slope, target, bias,
-                              "resistance" if above else "support")]
+                              "resistance" if above else "support", slack=slack)]
             if bias == "bullish":
-                invalidation = {"side": "below", "price": lower.at(last), "slope": lower.slope}
+                invalidation = {"side": "below", "price": lower.at(last), "slope": lower.slope,
+                                "slack": slack}
             else:
-                invalidation = {"side": "above", "price": upper.at(last), "slope": upper.slope}
+                invalidation = {"side": "above", "price": upper.at(last), "slope": upper.slope,
+                                "slack": slack}
         width_percent = int((1 - width_end / width_start) * 100 + 0.5)
         # A symmetrical shape projects both measured moves; the others have one side.
         targets = [up_target, down_target] if kind == "symmetrical" else [target]
@@ -750,13 +757,15 @@ def _bar_step(bars):
     return bars[1]["time"] - bars[0]["time"] if len(bars) > 1 else 60
 
 
-def first_close_past(bars, *, anchor_time, price, slope, side, max_drift_bars=FORMING_WINDOW):
+def first_close_past(bars, *, anchor_time, price, slope, side, max_drift_bars=FORMING_WINDOW,
+                     slack=0.0):
     """The first closed bar after ``anchor_time`` that trades beyond a pinned level.
 
     The level is re-priced for each newer candle from the ``slope`` it was quoted with, so a
     sloped neckline is not tested at the price it had on the poll that found it. Bars further
     out than ``max_drift_bars`` are ignored: the job polls every minute, so a break that far
-    behind was missed while the service was down and is stale news.
+    behind was missed while the service was down and is stale news. ``slack`` is the same
+    noise band the detector applies — a close must clear the line by that much to count.
     """
     step = _bar_step(bars)
     horizon = anchor_time + max_drift_bars * step
@@ -764,9 +773,9 @@ def first_close_past(bars, *, anchor_time, price, slope, side, max_drift_bars=FO
         if bar["time"] <= anchor_time or bar["time"] > horizon:
             continue
         level = price + slope * ((bar["time"] - anchor_time) / step)
-        if side == "up" and bar["close"] > level:
+        if side == "up" and bar["close"] > level + slack:
             return bar
-        if side == "down" and bar["close"] < level:
+        if side == "down" and bar["close"] < level - slack:
             return bar
     return None
 
@@ -794,7 +803,7 @@ def _traded_level(match):
 
 def _pinned(level, anchor_time):
     return {"side": level["side"], "price": level["price"], "slope": level["slope"],
-            "anchor_time": anchor_time}
+            "slack": level.get("slack") or 0.0, "anchor_time": anchor_time}
 
 
 def _pinned_invalidation(invalidation, anchor_time):
@@ -805,6 +814,7 @@ def _pinned_invalidation(invalidation, anchor_time):
         "side": "up" if invalidation["side"] == "above" else "down",
         "price": invalidation["price"],
         "slope": invalidation.get("slope") or 0.0,
+        "slack": invalidation.get("slack") or 0.0,
     }, anchor_time)
 
 
@@ -861,7 +871,7 @@ def pattern_evaluate(bars, match, state, *, symbol, timeframe, first_poll=False)
             return [], {**state, "state": "idle"}
         broke = first_close_past(
             bars, anchor_time=entry["anchor_time"], price=entry["price"],
-            slope=entry["slope"], side=entry["side"],
+            slope=entry["slope"], side=entry["side"], slack=entry.get("slack") or 0.0,
         )
         if broke is not None and entry.get("needs_swing") and not _swing_completed(bars, state["key"]):
             # The neckline gave way before the second top or right shoulder printed: the
@@ -884,6 +894,7 @@ def pattern_evaluate(bars, match, state, *, symbol, timeframe, first_poll=False)
         if invalidation and first_close_past(
             bars, anchor_time=invalidation["anchor_time"], price=invalidation["price"],
             slope=invalidation["slope"], side=invalidation["side"],
+            slack=invalidation.get("slack") or 0.0,
         ) is not None:
             return [], {**state, "state": "idle", "entry": {}, "invalidation": {}, "target": None}
         if last_time - entry["anchor_time"] > FORMING_WINDOW * step:

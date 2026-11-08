@@ -856,7 +856,7 @@ def _pattern_bias_word(bias):
     return "Bullish" if bias == "bullish" else "Bearish"
 
 
-def _pattern_close_time(seconds):
+def _pattern_bar_time(seconds):
     return datetime.fromtimestamp(seconds, tz=dt_timezone.utc)
 
 
@@ -903,7 +903,7 @@ def _pattern_alert_message(alert, signal, state):
     if alert.note:
         lines.append(f"Note: {alert.note}")
     lines.append(
-        f"Report: {_report_url(alert, _pattern_close_time(signal['bar_time']), subject=_pattern_event_title(alert, signal, state))}"
+        f"Report: {_report_url(alert, _pattern_bar_time(signal['bar_time']), subject=_pattern_event_title(alert, signal, state))}"
     )
     return "\n".join(lines)
 
@@ -945,75 +945,80 @@ def check_pattern_alerts(*, stdout=None):
     fired = []
     now = timezone.now()
     for candidate in alerts:
-        with transaction.atomic():
-            alert = Alert.objects.select_for_update().filter(
-                pk=candidate.pk, active=True, kind=Alert.Kind.PATTERN,
-            ).first()
-            if alert is None:
-                continue
-            bars = recent_bars(alert.symbol, alert.timeframe)
-            if not bars:
-                continue
-            bar_time = _pattern_close_time(bars[-1]["time"])
-            if alert.pattern_last_bar_time is not None and bar_time <= alert.pattern_last_bar_time:
-                continue
-            state = {
-                "state": alert.pattern_state,
-                "key": alert.pattern_key,
-                "bias": alert.pattern_bias,
-                "signature": alert.pattern_signature,
-                "entry": alert.pattern_entry or {},
-                "target": alert.pattern_target,
-                "invalidation": alert.pattern_invalidation or {},
-                "end_time": (
-                    int(alert.pattern_end_time.timestamp()) if alert.pattern_end_time else None
-                ),
-            }
-            signals, state = pattern_evaluate(
-                bars,
-                best_pattern(detect_patterns(list(PATTERN_SCAN_KEYS), bars)),
-                state,
-                symbol=alert.symbol,
-                timeframe=alert.timeframe,
-                first_poll=alert.pattern_last_bar_time is None,
-            )
-            events = [
-                TriggerEvent.objects.create(
-                    alert=alert,
+        try:
+            with transaction.atomic():
+                alert = Alert.objects.select_for_update().filter(
+                    pk=candidate.pk, active=True, kind=Alert.Kind.PATTERN,
+                ).first()
+                if alert is None:
+                    continue
+                bars = recent_bars(alert.symbol, alert.timeframe)
+                if not bars:
+                    continue
+                bar_time = _pattern_bar_time(bars[-1]["time"])
+                if alert.pattern_last_bar_time is not None and bar_time <= alert.pattern_last_bar_time:
+                    continue
+                state = {
+                    "state": alert.pattern_state,
+                    "key": alert.pattern_key,
+                    "bias": alert.pattern_bias,
+                    "signature": alert.pattern_signature,
+                    "entry": alert.pattern_entry or {},
+                    "target": alert.pattern_target,
+                    "invalidation": alert.pattern_invalidation or {},
+                    "end_time": (
+                        int(alert.pattern_end_time.timestamp()) if alert.pattern_end_time else None
+                    ),
+                }
+                signals, state = pattern_evaluate(
+                    bars,
+                    best_pattern(detect_patterns(list(PATTERN_SCAN_KEYS), bars)),
+                    state,
                     symbol=alert.symbol,
-                    title=_pattern_event_title(alert, signal, state),
-                    message=_pattern_alert_message(alert, signal, state),
-                    observed_value=signal["close"],
+                    timeframe=alert.timeframe,
+                    first_poll=alert.pattern_last_bar_time is None,
                 )
-                for signal in signals
-            ]
-            alert.pattern_state = state["state"]
-            alert.pattern_key = state["key"]
-            alert.pattern_bias = state["bias"]
-            alert.pattern_signature = state["signature"]
-            alert.pattern_entry = state["entry"]
-            alert.pattern_target = state["target"]
-            alert.pattern_invalidation = state["invalidation"]
-            alert.pattern_end_time = (
-                _pattern_close_time(state["end_time"]) if state["end_time"] else None
-            )
-            alert.pattern_last_bar_time = bar_time
-            alert.last_observed_value = bars[-1]["close"]
-            if events:
-                alert.last_triggered_at = now
-                fired.extend(events)
-            # A once alert has said everything it can about this formation once the pair is
-            # complete; an every alert stays live and waits for the next shape to form.
-            completed = any(signal["event"] == "breakout" for signal in signals)
-            finished = completed and alert.frequency == Alert.Frequency.ONCE
-            if finished:
-                alert.active = False
-            alert.save(update_fields=[
-                "pattern_state", "pattern_key", "pattern_bias", "pattern_signature",
-                "pattern_entry", "pattern_target", "pattern_invalidation",
-                "pattern_end_time", "pattern_last_bar_time", "last_observed_value",
-                "last_triggered_at", "updated_at",
-            ] + (["active"] if finished else []))
+                events = [
+                    TriggerEvent.objects.create(
+                        alert=alert,
+                        symbol=alert.symbol,
+                        title=_pattern_event_title(alert, signal, state),
+                        message=_pattern_alert_message(alert, signal, state),
+                        observed_value=signal["close"],
+                    )
+                    for signal in signals
+                ]
+                alert.pattern_state = state["state"]
+                alert.pattern_key = state["key"]
+                alert.pattern_bias = state["bias"]
+                alert.pattern_signature = state["signature"]
+                alert.pattern_entry = state["entry"]
+                alert.pattern_target = state["target"]
+                alert.pattern_invalidation = state["invalidation"]
+                alert.pattern_end_time = (
+                    _pattern_bar_time(state["end_time"]) if state["end_time"] else None
+                )
+                alert.pattern_last_bar_time = bar_time
+                alert.last_observed_value = bars[-1]["close"]
+                if events:
+                    alert.last_triggered_at = now
+                    fired.extend(events)
+                # A once alert has said everything it can about this formation once the pair is
+                # complete; an every alert stays live and waits for the next shape to form.
+                completed = any(signal["event"] == "breakout" for signal in signals)
+                finished = completed and alert.frequency == Alert.Frequency.ONCE
+                if finished:
+                    alert.active = False
+                alert.save(update_fields=[
+                    "pattern_state", "pattern_key", "pattern_bias", "pattern_signature",
+                    "pattern_entry", "pattern_target", "pattern_invalidation",
+                    "pattern_end_time", "pattern_last_bar_time", "last_observed_value",
+                    "last_triggered_at", "updated_at",
+                ] + (["active"] if finished else []))
+        except Exception:
+            # One broken alert must not stop the others or hold back their notifications.
+            logger.exception("Pattern alert %s check failed", candidate.pk)
+            continue
 
     for event in fired:
         _notify(event, configuration)

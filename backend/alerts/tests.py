@@ -803,7 +803,7 @@ class AppConfigurationTests(TestCase):
         self.assertEqual(configuration.alert_poll_seconds, 5)
 
         exchange = Exchange.load()
-        self.assertEqual(exchange.exchange_url, "https://www.binance.com/fapi/v1")
+        self.assertEqual(exchange.exchange_url, "https://data-api.binance.vision/api/v3")
         self.assertEqual(exchange.exchange_timeout, 10)
         exchange.exchange_url = "https://example.test/api"
         exchange.exchange_timeout = 4
@@ -1903,6 +1903,36 @@ class PatternStateMachineTests(SimpleTestCase):
             bars, anchor_time=pattern_time(0), price=107.0, slope=-1.0, side="up",
             max_drift_bars=2,
         ))
+
+    def test_a_forming_convergence_alert_honours_the_detectors_noise_band(self):
+        # The detector only calls a channel break once the close clears the edge by
+        # 5% of the window's span; the pinned alert has to wait for the same margin.
+        points = [
+            [0, 101], [5, 99], [10, 110], [15, 102], [20, 110], [25, 105],
+            [30, 110], [35, 109], [39, 109],
+        ]
+        bars = pattern_anchors(points, 40)
+        match = only_pattern(["ascending_triangle"], bars)
+        signals, pinned = pattern_evaluate(
+            bars, match, None, symbol="BTCUSDT", timeframe="1h",
+        )
+        self.assertEqual([signal["event"] for signal in signals], ["forming"])
+        self.assertGreater(pinned["entry"]["slack"], 0)
+
+        # 110.6 clears the 110.25 resistance but stays inside the band: no breakout.
+        inside = pattern_anchors(points + [[40, 110.6]], 41)
+        signals, state = pattern_evaluate(
+            inside, None, pinned, symbol="BTCUSDT", timeframe="1h",
+        )
+        self.assertEqual(signals, [])
+        self.assertEqual(state["state"], "forming")
+
+        # 111.5 clears the band: the breakout the warning promised.
+        outside = pattern_anchors(points + [[40, 111.5]], 41)
+        signals, state = pattern_evaluate(
+            outside, None, state, symbol="BTCUSDT", timeframe="1h",
+        )
+        self.assertEqual([signal["event"] for signal in signals], ["breakout"])
 
 
 class PatternAlertTests(TestCase):

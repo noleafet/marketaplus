@@ -187,17 +187,16 @@ class Alert(models.Model):
     trend_enabled = models.BooleanField(default=True, help_text="Enable EMA trend context by default")
     trend_period = models.PositiveSmallIntegerField(default=100, null=True, blank=True, help_text="EMA period for the trend filter (defaults to the 100 EMA)")
 
-    # Chart-pattern alerts walk one shape through idle -> forming -> entered. The forming
+    # Chart-pattern alerts walk one shape through idle -> forming -> idle. The forming
     # event pins the numbers the entry event has to repeat, so a sloped neckline is stored
     # with its per-bar drift and re-quoted as the window slides.
     class PatternState(models.TextChoices):
         IDLE = "idle", "Idle"
         FORMING = "forming", "Forming"
-        ENTERED = "entered", "Entered"
 
     pattern_state = models.CharField(
         max_length=12, choices=PatternState.choices, default=PatternState.IDLE,
-        help_text="Internal state: waiting, warned about a forming shape, or entered on the break",
+        help_text="Internal state: waiting for a shape, or watching a pinned one for its break",
     )
     pattern_key = models.CharField(max_length=40, blank=True, default="")
     pattern_bias = models.CharField(max_length=8, blank=True, default="")
