@@ -1,3 +1,4 @@
+import type { Dispatch, SetStateAction } from "react";
 import type { UTCTimestamp } from "lightweight-charts";
 
 /** Intervals supported by both exchanges and the alert engine. The chart omits 1m: candles refresh on a 60-second cadence. */
@@ -160,6 +161,55 @@ export type MarketEvent = {
   categories: string[];
   is_estimated: boolean;
   updated_at: string;
+};
+
+/** The most charts the workspace can hold open at once; a further pair click is refused. */
+export const MAX_CHART_TABS = 5;
+
+/** Persisted tab strip: the open pairs in order plus the one on screen. */
+export type ChartTabsState = {
+  tabs: string[];
+  active: string;
+};
+
+/** Latest readings the visible chart reports upward for the annotate panel's calculator. */
+export type ChartLiveInfo = {
+  timeframe: Timeframe;
+  /** Latest close, or the newest bar's close while the quote is still loading. */
+  price: number | null;
+  ema100: number | null;
+  rsi14: number | null;
+  atr14: number | null;
+};
+
+/** Imperative surface a chart exposes so the shell can draw a calculator setup into it. */
+export type MarketChartHandle = {
+  drawEntry: (request: TradeEntryDrawing) => void;
+};
+
+export type MarketChartProps = {
+  symbol: string;
+  exchange: Exchange;
+  theme: "light" | "dark";
+  onExchangeChange?: (exchange: Exchange) => void;
+  /** False while another tab is on screen; guards keyboard shortcuts and info reporting. */
+  active: boolean;
+  drawings: Drawing[];
+  onDrawingsChange: Dispatch<SetStateAction<Drawing[]>>;
+  selected: string | null;
+  onSelectedChange: Dispatch<SetStateAction<string | null>>;
+  alerts: LineAlert[];
+  onCreateLineAlert: (drawing: Drawing, condition: string, frequency: string) => Promise<void>;
+  onUpdateLineAlert: (drawing: Drawing) => void;
+  onDeleteLineAlert: (drawing: Drawing) => void;
+  onPriceSelect: (price: string) => void;
+  /** 24h change from the shell's batched quote poll; the chart's own reading is the fallback. */
+  dayChange: number | null;
+  /** Fired only while this chart is the visible tab; the symbol keys the report. */
+  onChartInfo: (symbol: string, info: ChartLiveInfo) => void;
+  onShowAnnotateTab: (tab: AnnotateTab) => void;
+  onShotsChanged: () => void;
+  handleRef: (symbol: string, handle: MarketChartHandle | null) => void;
 };
 
 export type MarketWorkspaceProps = {
