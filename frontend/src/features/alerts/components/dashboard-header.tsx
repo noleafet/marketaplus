@@ -42,7 +42,8 @@ export default function DashboardHeader({
         >
           <LuMenu className="size-4" />
         </Button>
-        <Separator orientation="vertical" className="mr-1 hidden h-4 sm:block" />
+        <img src="/logo.png" alt="Marketa +" className="size-6" />
+        <Separator orientation="vertical" className="mr-1 h-4 sm:block" />
         <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
           <span className="hidden text-muted-foreground sm:inline">Dashboard</span>
           <LuChevronRight className="hidden size-3.5 text-muted-foreground/70 sm:inline" />
@@ -81,20 +82,13 @@ export default function DashboardHeader({
         <Button
           variant="ghost"
           size="icon"
-          className="size-8"
+          className="size-6"
           aria-label={`Switch to ${nextTheme} mode`}
           title={`Switch to ${nextTheme} mode`}
           onClick={onToggleTheme}
         >
           {theme === "dark" ? <LuSun className="size-4" /> : <LuMoon className="size-4" />}
         </Button>
-
-        <span
-          className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground"
-          aria-hidden="true"
-        >
-          M+
-        </span>
       </div>
     </header>
   );
