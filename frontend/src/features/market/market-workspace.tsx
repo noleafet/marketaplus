@@ -110,8 +110,10 @@ export default function MarketWorkspace({
       return;
     }
     if (tabs.length >= MAX_CHART_TABS) {
-      setTabNotice(`Maximum of ${MAX_CHART_TABS} charts is open. Close a tab first.`);
+      // A full strip evicts its oldest tab rather than refusing the pair.
+      setTabNotice(`Maximum of ${MAX_CHART_TABS} charts is open. Closing the first tab.`);
       window.setTimeout(() => setTabNotice(""), 4000);
+      setTabState({ tabs: [...tabs.slice(1), pair], active: pair });
       return;
     }
     setTabState({ tabs: [...tabs, pair], active: pair });
