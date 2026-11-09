@@ -16,7 +16,7 @@ Marketa+ combines a **Next.js dashboard**, **Django REST API**, and **PostgreSQL
 - **Charts:** Candlesticks, volume, Heikin Ashi, EMA, Bollinger Bands, MACD, RSI, ATR, key levels, and 1H/4H/1D trend-bias channels.
 - **Watchlist:** Database-backed symbols, exchange selection, and optional scan columns for volume versus the previous 20-candle average, RSI-14, EMA-100, MACD line-minus-signal difference, and open interest (from the futures market).
 - **Key levels:** Nearby support/resistance zones scored from 0–100 using swing reactions, rejection, higher-timeframe confluence, volume, and recency. Only levels scoring at least 40 are displayed.
-- **Alerts:** Price, MACD cross, drawing-line, and chart-pattern alerts. Browser notifications, sound, and optional Telegram delivery are supported.
+- **Alerts:** Price, MACD cross, drawing-line, chart-pattern, trend-recovery, and swing-detection alerts. Browser notifications, sound, and optional Telegram delivery are supported.
 - **Pattern monitor:** Checks the latest 50 candles every 60 seconds; identifies patterns that are forming or confirmed, projects triggers and measured targets, and saves chart snapshots.
 - **Market events:** CoinMarketCal event scraping for watchlist coins every 4 hours from 02:00 UTC, using CoinGecko coin IDs/slugs without a provider API key.
 - **Persistence:** Django stores alerts, trigger history, watchlist symbols, exchange settings, and pattern snapshots. Chart preferences and drawings remain browser-local.
@@ -30,7 +30,7 @@ Marketa+ combines a **Next.js dashboard**, **Django REST API**, and **PostgreSQL
   - `src/types/`, `src/styles/` — shared types and styling.
 - `backend/` — Django REST Framework API and alert evaluator.
 - **Database:** PostgreSQL; SQLite is used when `DATABASE_URL` is not set.
-- **Scheduler:** `run_alerts` runs regular alert checks, the chart-pattern monitor every 60 seconds, and market-event sync every 4 hours from 02:00 UTC (02, 06, 10, 14, 18, 22). Run only one scheduler per app instance.
+- **Scheduler:** `run_alerts` runs regular alert checks, candle-based detectors (patterns, trend recovery, and swing detection) every 60 seconds, and market-event sync every 4 hours from 02:00 UTC (02, 06, 10, 14, 18, 22). Run only one scheduler per app instance.
 - **Configuration:** Exchange URL/timeout, polling interval, and Telegram settings are stored in the Django admin configuration.
 
 ## Requirements

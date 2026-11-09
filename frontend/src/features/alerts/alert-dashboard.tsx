@@ -40,6 +40,7 @@ export default function AlertDashboard() {
   const [trendEnabled, setTrendEnabled] = useState(true);
   const [trendPeriod, setTrendPeriod] = useState("100");
   const [patternTimeframe, setPatternTimeframe] = useState<(typeof timeframes)[number]>("1h");
+  const [swingTimeframe, setSwingTimeframe] = useState<(typeof timeframes)[number]>("1h");
   const [recoveryTrigger, setRecoveryTrigger] = useState<RecoveryTrigger>("sma");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [notificationAvailable, setNotificationAvailable] = useState(false);
@@ -248,6 +249,9 @@ export default function AlertDashboard() {
       payload.timeframe = "1h";
       payload.condition = "cross";
       payload.recovery_trigger = recoveryTrigger;
+    } else if (kind === "swing_detection") {
+      payload.timeframe = swingTimeframe;
+      payload.condition = "cross";
     } else {
       payload.timeframe = patternTimeframe;
     }
@@ -266,7 +270,7 @@ export default function AlertDashboard() {
     setRsiTimeframe("1h"); setTrendTimeframe("1h");
     setRsiEnabled(true); setRsiSettings(defaultRsiSettings);
     setTrendEnabled(true); setTrendPeriod("100");
-    setPatternTimeframe("1h"); setRecoveryTrigger("sma"); setFieldErrors({});
+    setPatternTimeframe("1h"); setSwingTimeframe("1h"); setRecoveryTrigger("sma"); setFieldErrors({});
   }
 
   async function toggleAlert(item: AlertItem) {
@@ -328,6 +332,7 @@ export default function AlertDashboard() {
   })();
   const patternSummary = `Watch the last 50 ${patternTimeframe} candles of ${marketSymbol || "the selected pair"} for a chart pattern. Notify while a shape is forming with the entry, invalidation and target it pins, then again when a completed candle closes through that entry at the same target.`;
   const recoverySummary = `Watch ${marketSymbol || "the selected pair"} on closed 1h candles. When the 1D EMA 19/39 and 4H EMA 12/26 MACDs agree on the trend, warn early as the 1h MACD (${recoveryTrigger === "ema" ? "EMA 12/100" : "SMA 3/10"}) recovers from a 3+ bar pullback through zero, then confirm on the zero-line cross. Bullish recoveries and bearish reversals are tracked as separate cycles.`;
+  const swingSummary = `Watch closed ${swingTimeframe} candles of ${marketSymbol || "the selected pair"}. Notify once per candle when its wick touches a current projected Trend Bias diagonal from the 1H, 4H or 1D reading.`;
   const formModel: AlertFormModel = {
     kind,
     onKindChange: setKind,
@@ -355,9 +360,12 @@ export default function AlertDashboard() {
     onTrendPeriodChange: setTrendPeriod,
     patternTimeframe,
     onPatternTimeframeChange: setPatternTimeframe,
+    swingTimeframe,
+    onSwingTimeframeChange: setSwingTimeframe,
     recoveryTrigger,
     onRecoveryTriggerChange: setRecoveryTrigger,
     patternSummary,
+    swingSummary,
     recoverySummary,
     fieldErrors,
     busy,

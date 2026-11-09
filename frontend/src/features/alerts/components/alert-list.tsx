@@ -67,7 +67,9 @@ export default function AlertList({
                   <span className="tag">
                     {item.kind === "macd"
                       ? `MACD · ${item.timeframe}${item.rsi_enabled ? ` + RSI ${item.rsi_timeframe || item.timeframe}` : ""}${item.trend_enabled ? ` + Trend ${item.trend_timeframe || "1h"}` : ""}`
-                      : item.kind === "pattern"
+                      : item.kind === "swing_detection"
+                        ? `SWING · ${item.timeframe}`
+                        : item.kind === "pattern"
                         ? `PATTERN · ${item.timeframe}`
                         : item.kind === "trend_recovery"
                           ? `TREND RECOVERY · 1h`
@@ -88,7 +90,9 @@ export default function AlertList({
                               .join(", ")})`
                           : ""
                       } · RSI ${item.rsi_timeframe || item.timeframe} · EMA ${item.trend_period || 100}/${item.trend_timeframe || "1h"}`
-                    : item.kind === "pattern"
+                    : item.kind === "swing_detection"
+                      ? `Wick touch of a current 1H/4H/1D trend-bias diagonal · one notice per ${item.timeframe} candle`
+                      : item.kind === "pattern"
                       ? patternProgress(item)
                       : item.kind === "trend_recovery"
                         ? `1D/4H MACD trend filter · 1h ${recoveryTriggers[item.recovery_trigger ?? "sma"] ?? "SMA 3/10"} trigger · bullish recovery + bearish reversal`

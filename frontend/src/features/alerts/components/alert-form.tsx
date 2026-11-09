@@ -34,9 +34,12 @@ export type AlertFormModel = {
   onTrendPeriodChange: (period: string) => void;
   patternTimeframe: (typeof timeframes)[number];
   onPatternTimeframeChange: (timeframe: (typeof timeframes)[number]) => void;
+  swingTimeframe: (typeof timeframes)[number];
+  onSwingTimeframeChange: (timeframe: (typeof timeframes)[number]) => void;
   recoveryTrigger: RecoveryTrigger;
   onRecoveryTriggerChange: (trigger: RecoveryTrigger) => void;
   patternSummary: string;
+  swingSummary: string;
   recoverySummary: string;
   fieldErrors: Record<string, string>;
   busy: boolean;
@@ -76,9 +79,12 @@ export default function AlertForm({ model, onSubmit }: Props) {
     onTrendPeriodChange,
     patternTimeframe,
     onPatternTimeframeChange,
+    swingTimeframe,
+    onSwingTimeframeChange,
     recoveryTrigger,
     onRecoveryTriggerChange,
     patternSummary,
+    swingSummary,
     recoverySummary,
     fieldErrors,
     busy,
@@ -103,6 +109,9 @@ export default function AlertForm({ model, onSubmit }: Props) {
         </button>
         <button className={kind === "trend_recovery" ? "selected" : ""} onClick={() => onKindChange("trend_recovery")}>
           Trend Recovery
+        </button>
+        <button className={kind === "swing_detection" ? "selected" : ""} onClick={() => onKindChange("swing_detection")}>
+          Swing detection
         </button>
         <button className={kind === "pattern" ? "selected" : ""} onClick={() => onKindChange("pattern")}>
           Pattern forming
@@ -378,6 +387,36 @@ export default function AlertForm({ model, onSubmit }: Props) {
             <div className="macd-summary" aria-live="polite">
               <b>This alert will</b>
               <p>{recoverySummary}</p>
+            </div>
+          </div>
+        )}
+        {kind === "swing_detection" && (
+          <div className="macd-config">
+            <div className="config-row">
+              <label>
+                Candle timeframe
+                <select
+                  name="swing_timeframe"
+                  value={swingTimeframe}
+                  onChange={(event) =>
+                    onSwingTimeframeChange(event.target.value as (typeof timeframes)[number])
+                  }
+                >
+                  {timeframes.map((timeframe) => (
+                    <option key={timeframe} value={timeframe}>
+                      {timeframe}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <p className="config-note">
+              Watches the current projected Trend Bias diagonals from the 1H, 4H and 1D
+              readings. A closed candle alerts when its wick touches one of those lines.
+            </p>
+            <div className="macd-summary" aria-live="polite">
+              <b>This alert will</b>
+              <p>{swingSummary}</p>
             </div>
           </div>
         )}

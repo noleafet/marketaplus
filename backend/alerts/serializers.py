@@ -181,6 +181,19 @@ class AlertSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     "recovery_trigger": "Choose sma (SMA 3/10) or ema (EMA 12/100).",
                 })
+        elif kind == Alert.Kind.SWING_DETECTION:
+            timeframe = attrs.get("timeframe", getattr(self.instance, "timeframe", ""))
+            if timeframe not in TIMEFRAMES:
+                raise serializers.ValidationError({
+                    "timeframe": f"Choose one of {', '.join(sorted(TIMEFRAMES))}.",
+                })
+            if attrs.get("price", getattr(self.instance, "price", None)) is not None:
+                raise serializers.ValidationError({
+                    "price": "A swing detection alert follows trend-bias touches, not a target price.",
+                })
+            if attrs.get("line_type", ""):
+                raise serializers.ValidationError({"line_type": "Line alerts are only available for price alerts."})
+            attrs["condition"] = Alert.Condition.CROSS
         elif kind == Alert.Kind.RSI:
             raise serializers.ValidationError({"kind": "RSI alerts are only available as a confirmation option for MACD alerts. Create a MACD alert and enable its RSI context."})
         return attrs

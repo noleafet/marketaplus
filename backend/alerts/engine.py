@@ -10,7 +10,9 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .events import sync_market_events
-from .services import check_alerts, check_pattern_alerts, check_recovery_alerts
+from .services import (
+    check_alerts, check_pattern_alerts, check_recovery_alerts, check_swing_alerts,
+)
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,11 @@ def _run_patterns(_options, output):
 
 def _run_recovery(_options, output):
     events = check_recovery_alerts(stdout=output)
+    return {"triggered": len(events)}
+
+
+def _run_swing(_options, output):
+    events = check_swing_alerts(stdout=output)
     return {"triggered": len(events)}
 
 
@@ -75,6 +82,16 @@ JOBS = {
                 "the same step the scheduler runs every 60 seconds."
             ),
             run=_run_recovery,
+        ),
+        EngineJob(
+            key="swing",
+            title="Check swing detection alerts",
+            description=(
+                "Recompute the 1H/4H/1D trend-bias diagonals and test newly closed "
+                "alert-timeframe candles for wick touches, the same step the scheduler "
+                "runs every 60 seconds."
+            ),
+            run=_run_swing,
         ),
         EngineJob(
             key="events",

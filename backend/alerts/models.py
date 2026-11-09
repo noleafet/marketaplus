@@ -136,6 +136,7 @@ class Alert(models.Model):
         RSI = "rsi", "RSI"
         PATTERN = "pattern", "Chart pattern"
         TREND_RECOVERY = "trend_recovery", "Trend recovery"
+        SWING_DETECTION = "swing_detection", "Swing detection"
 
     class Condition(models.TextChoices):
         CROSS_UP = "cross_up", "Crosses above"
@@ -271,6 +272,8 @@ class Alert(models.Model):
             target = f"pattern {self.pattern_key or 'any'} {self.timeframe}"
         elif self.kind == self.Kind.TREND_RECOVERY:
             target = f"trend recovery {self.recovery_trigger} {self.timeframe}"
+        elif self.kind == self.Kind.SWING_DETECTION:
+            target = f"swing detection {self.timeframe}"
         else:
             target = str(self.price or "line")
         return f"{self.symbol} {self.condition} {target}"

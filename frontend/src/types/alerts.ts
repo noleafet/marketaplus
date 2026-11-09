@@ -1,7 +1,7 @@
 export type AlertItem = {
   id: number;
   symbol: string;
-  kind: "price" | "macd" | "pattern" | "trend_recovery";
+  kind: "price" | "macd" | "pattern" | "trend_recovery" | "swing_detection";
   condition: string;
   price: string | null;
   timeframe: string;
@@ -49,6 +49,6 @@ export type ToastItem = {
   message: string;
 };
 
-export type AlertKind = "price" | "macd" | "pattern" | "trend_recovery";
+export type AlertKind = "price" | "macd" | "pattern" | "trend_recovery" | "swing_detection";
 export type RecoveryTrigger = "sma" | "ema";
 export type RsiSettings = { period: string; oversold: string; overbought: string };

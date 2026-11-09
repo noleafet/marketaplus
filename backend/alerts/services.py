@@ -18,6 +18,10 @@ from .patterns import (
     PATTERN_LABELS, RECENT_BARS as PATTERN_RECENT_BARS, best_pattern, detect_patterns,
     pattern_evaluate,
 )
+from .swing import (
+    SWING_BIAS_BARS, SWING_BIAS_TIMEFRAMES, SWING_DETECTION_BARS, touches_for_bar,
+)
+from .trend_bias import find_trend_bias
 
 logger = logging.getLogger(__name__)
 TIMEFRAME_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800}
@@ -505,7 +509,9 @@ def check_alerts(*, stdout=None):
     # (check_pattern_alerts, check_recovery_alerts).
     alerts = list(
         Alert.objects.filter(active=True)
-        .exclude(kind__in=[Alert.Kind.PATTERN, Alert.Kind.TREND_RECOVERY])
+        .exclude(kind__in=[
+            Alert.Kind.PATTERN, Alert.Kind.TREND_RECOVERY, Alert.Kind.SWING_DETECTION,
+        ])
         .order_by("id")
     )
     price_symbols = {a.symbol for a in alerts if a.kind == Alert.Kind.PRICE}
@@ -843,6 +849,167 @@ def check_recovery_alerts(*, stdout=None):
                 alert.save(update_fields=update_fields)
         except Exception:
             logger.exception("Trend recovery alert %s check failed", candidate.pk)
+            continue
+
+    for event in fired:
+        _notify(event, configuration)
+        if stdout is not None:
+            stdout.write(f"Triggered: {event.title} — {event.message}")
+    return fired
+
+
+def _swing_bar_time(seconds):
+    return datetime.fromtimestamp(seconds, tz=dt_timezone.utc)
+
+
+def _swing_event_title(alert, bar):
+    return f"{alert.symbol}({alert.timeframe}) Swing Detection - Touch"
+
+
+def _swing_touch_text(touch):
+    direction = touch["direction"].title() if touch.get("direction") else "Neutral"
+    slope = touch.get("slope_pct_per_bar")
+    slope_text = f", {slope:+.2f}%/bar" if slope is not None else ""
+    pivots = touch.get("pivots")
+    pivot_text = f", {pivots} pivots" if pivots is not None else ""
+    return (
+        f"{touch['bias_timeframe'].upper()} {touch['kind_label']} "
+        f"{_format_price(touch['level'])} ({direction}{slope_text}{pivot_text})"
+    )
+
+
+def _swing_alert_message(alert, bar, touches):
+    title = _swing_event_title(alert, bar)
+    lines = [
+        "Status: Swing touch",
+        f"Current Price: {_format_price(bar['close'])}",
+        "Touched: " + "; ".join(_swing_touch_text(touch) for touch in touches),
+    ]
+    if alert.note:
+        lines.append(f"Note: {alert.note}")
+    lines.append(
+        f"Report: {_report_url(alert, _swing_bar_time(bar['time']), subject=title)}"
+    )
+    return "\n".join(lines)
+
+
+def check_swing_alerts(*, stdout=None):
+    """Advance swing-detection alerts over newly closed candles.
+
+    Each alert candle timeframe is checked against the current projected
+    trend-bias diagonals from the 1H, 4H and 1D readings. The first poll only
+    arms at the newest closed candle; later polls evaluate every closed candle
+    since the stored bar once, so a touch cannot be replayed by the next poll.
+    """
+    configuration = AppConfiguration.load()
+    exchange = Exchange.load()
+    candidates = list(
+        Alert.objects.filter(active=True, kind=Alert.Kind.SWING_DETECTION).order_by("id")
+    )
+    if not candidates:
+        return []
+
+    bars_cache = {}
+    bias_cache = {}
+    now_seconds = time.time()
+    now = timezone.now()
+
+    def closed_bars(symbol, timeframe, limit):
+        key = (symbol, timeframe, limit)
+        if key not in bars_cache:
+            try:
+                bars_cache[key] = _closed_bars(symbol, timeframe, exchange, limit)
+            except (requests.RequestException, KeyError, IndexError, ValueError) as exc:
+                logger.warning(
+                    "Could not fetch %s %s candles for swing detection: %s",
+                    symbol, timeframe, exc,
+                )
+                bars_cache[key] = None
+        return bars_cache[key]
+
+    def biases_for(symbol):
+        """All three trend-bias readings for a symbol, or None when a feed failed."""
+        if symbol in bias_cache:
+            return bias_cache[symbol]
+        biases = {}
+        for timeframe in SWING_BIAS_TIMEFRAMES:
+            bars = closed_bars(symbol, timeframe, SWING_BIAS_BARS)
+            if bars is None:
+                bias_cache[symbol] = None
+                return None
+            biases[timeframe] = find_trend_bias(bars, timeframe, now_seconds)
+        bias_cache[symbol] = biases
+        return biases
+
+    fired = []
+    for candidate in candidates:
+        try:
+            with transaction.atomic():
+                alert = Alert.objects.select_for_update().filter(
+                    pk=candidate.pk, active=True, kind=Alert.Kind.SWING_DETECTION,
+                ).first()
+                if alert is None:
+                    continue
+                bars = closed_bars(alert.symbol, alert.timeframe, SWING_DETECTION_BARS)
+                if bars is None or not bars:
+                    continue
+                biases = biases_for(alert.symbol)
+                if biases is None:
+                    continue
+
+                if alert.last_bar_open_time is None:
+                    # Arm at the latest closed candle; never replay history.
+                    latest = bars[-1]
+                    alert.last_bar_open_time = _swing_bar_time(latest["time"])
+                    alert.last_observed_value = latest["close"]
+                    alert.save(update_fields=[
+                        "last_bar_open_time", "last_observed_value", "updated_at",
+                    ])
+                    continue
+
+                last_seen = int(alert.last_bar_open_time.timestamp())
+                new_bars = [bar for bar in bars if bar["time"] > last_seen]
+                if not new_bars:
+                    continue
+
+                created = []
+                evaluated_bar = None
+                deactivate = False
+                for bar in new_bars:
+                    touches = touches_for_bar(bar, biases)
+                    if not touches or not _may_fire(alert, now):
+                        continue
+                    title = _swing_event_title(alert, bar)
+                    created.append(TriggerEvent.objects.create(
+                        alert=alert,
+                        symbol=alert.symbol,
+                        title=title,
+                        message=_swing_alert_message(alert, bar, touches),
+                        observed_value=bar["close"],
+                    ))
+                    alert.last_triggered_at = now
+                    evaluated_bar = bar
+                    if alert.frequency == Alert.Frequency.ONCE:
+                        alert.active = False
+                        deactivate = True
+                        break
+                if evaluated_bar is None:
+                    evaluated_bar = new_bars[-1]
+
+                alert.last_bar_open_time = _swing_bar_time(evaluated_bar["time"])
+                alert.last_observed_value = evaluated_bar["close"]
+                update_fields = [
+                    "last_bar_open_time", "last_observed_value", "updated_at",
+                ]
+                if created:
+                    update_fields.append("last_triggered_at")
+                if deactivate:
+                    update_fields.append("active")
+                alert.save(update_fields=update_fields)
+                fired.extend(created)
+        except Exception:
+            # One broken alert must not stop the others or hold back their notifications.
+            logger.exception("Swing detection alert %s check failed", candidate.pk)
             continue
 
     for event in fired:

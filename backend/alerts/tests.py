@@ -21,10 +21,12 @@ from .patterns import (
     DETECTED_PATTERN_KEYS, best_pattern, detect_patterns, first_close_past, pattern_evaluate,
 )
 from .recovery import detect_events, macd_series, trend_signs
+from .swing import touches_for_bar
+from .trend_bias import find_trend_bias
 from .services import (
     _closed_bars, _ema, _macd_approach_thresholds, _notify,
     _trend_signal, _volume_percent, check_alerts, check_pattern_alerts,
-    check_recovery_alerts, get_market_candles, get_market_quote,
+    check_recovery_alerts, check_swing_alerts, get_market_candles, get_market_quote,
 )
 
 
@@ -1437,7 +1439,7 @@ class EngineApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         keys = {job["key"] for job in response.data}
-        self.assertEqual(keys, {"alerts", "patterns", "recovery", "events"})
+        self.assertEqual(keys, {"alerts", "patterns", "recovery", "swing", "events"})
 
     @patch("alerts.engine.check_alerts", return_value=[])
     def test_running_the_alerts_job_returns_captured_output(self, check):
@@ -1455,6 +1457,15 @@ class EngineApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["job"], "patterns")
+        self.assertEqual(response.data["triggered"], 0)
+        check.assert_called_once()
+
+    @patch("alerts.engine.check_swing_alerts", return_value=[])
+    def test_running_the_swing_job(self, check):
+        response = self.client.post("/api/engine/run/", {"job": "swing"}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["job"], "swing")
         self.assertEqual(response.data["triggered"], 0)
         check.assert_called_once()
 
@@ -2547,6 +2558,344 @@ class TrendRecoveryCheckerTests(TestCase):
             symbol="BTCUSDT", kind=Alert.Kind.TREND_RECOVERY,
             condition=Alert.Condition.CROSS, timeframe="1h",
         )
+        with patch("alerts.services._closed_bars") as closed_bars:
+            check_alerts()
+        closed_bars.assert_not_called()
+
+
+SWING_START = 1_600_000_000
+SWING_HOUR = 3600
+SWING_BAR_START = 1_700_000_000
+SWING_BAR_STEP = 300
+
+
+def swing_zigzag(anchors):
+    """Straight-legged series through turning points, wick plus or minus a half unit."""
+    bars = []
+    leg = 0
+    for index in range(anchors[-1][0] + 1):
+        while leg < len(anchors) - 2 and anchors[leg + 1][0] <= index:
+            leg += 1
+        from_index, from_price = anchors[leg]
+        to_index, to_price = anchors[leg + 1]
+        price = from_price + (to_price - from_price) * (index - from_index) / (to_index - from_index)
+        bars.append({
+            "time": SWING_START + index * SWING_HOUR,
+            "open": price, "high": price + 0.5, "low": price - 0.5,
+            "close": price, "volume": 1,
+        })
+    return bars
+
+
+def swing_rising_bars():
+    return swing_zigzag([
+        [0, 10], [25, 30], [35, 26], [60, 50], [70, 44], [95, 70],
+        [105, 64], [125, 90], [135, 86], [145, 96],
+    ])
+
+
+def swing_falling_bars():
+    return [{
+        **bar,
+        "open": 200 - bar["open"],
+        "high": 200 - bar["low"],
+        "low": 200 - bar["high"],
+        "close": 200 - bar["close"],
+    } for bar in swing_rising_bars()]
+
+
+def swing_mixed_bars():
+    return swing_zigzag([
+        [0, 100], [20, 120], [40, 60], [60, 110], [80, 70],
+        [100, 105], [120, 85], [140, 100], [150, 98],
+    ])
+
+
+def swing_now(bars):
+    return bars[-1]["time"] + SWING_HOUR
+
+
+def swing_current_lines(bias):
+    return [line for line in bias["lines"] if line["segment"] == "current"]
+
+
+class TrendBiasParityTests(SimpleTestCase):
+    """The backend port has to agree with the chart's trend-bias fixtures."""
+
+    def test_rising_zigzag_is_bullish_with_projected_current_lines(self):
+        bars = swing_rising_bars()
+        now = swing_now(bars)
+        bias = find_trend_bias(bars, "1h", now)
+
+        self.assertIsNotNone(bias)
+        self.assertEqual(bias["direction"], "bullish")
+        live = swing_current_lines(bias)
+        self.assertEqual(sorted(line["kind"] for line in live), ["high", "low"])
+        for line in live:
+            self.assertGreater(line["slope"], 0)
+            self.assertGreater(line["p2"], line["p1"])
+            self.assertEqual(line["t2"], now + 86400)
+            self.assertGreaterEqual(line["pivots"], 2)
+
+    def test_falling_zigzag_is_bearish(self):
+        bars = swing_falling_bars()
+        bias = find_trend_bias(bars, "1h", swing_now(bars))
+
+        self.assertIsNotNone(bias)
+        self.assertEqual(bias["direction"], "bearish")
+        for line in bias["lines"]:
+            self.assertLess(line["slope"], 0)
+
+    def test_mixed_structure_is_neutral(self):
+        bars = swing_mixed_bars()
+        bias = find_trend_bias(bars, "1h", swing_now(bars))
+
+        self.assertIsNotNone(bias)
+        self.assertEqual(bias["direction"], "neutral")
+        live = swing_current_lines(bias)
+        self.assertEqual(len(live), 2)
+        self.assertEqual(
+            (live[0]["slope"] > 0) != (live[1]["slope"] > 0),
+            True,
+        )
+
+    def test_prior_segments_stop_on_the_breaking_candle(self):
+        bars = swing_zigzag([
+            [0, 50], [20, 80], [30, 70], [60, 120], [70, 105], [80, 150],
+            [90, 100], [100, 90], [120, 110], [130, 100], [150, 130],
+            [160, 125], [170, 140],
+        ])
+        last_time = bars[-1]["time"]
+        bias = find_trend_bias(bars, "1h", last_time + SWING_HOUR)
+
+        self.assertIsNotNone(bias)
+        self.assertEqual(bias["direction"], "bullish")
+        prior = [line for line in bias["lines"] if line["segment"] == "prior"]
+        live = swing_current_lines(bias)
+        self.assertEqual(sorted(line["kind"] for line in prior), ["high", "low"])
+        for line in prior:
+            self.assertLess(line["t2"], last_time)
+            replacement = next(item for item in live if item["kind"] == line["kind"])
+            self.assertLessEqual(line["t2"], replacement["t1"])
+
+    def test_still_forming_candle_is_ignored(self):
+        bars = swing_rising_bars()
+        last_time = bars[-1]["time"]
+        live = {
+            "time": last_time + SWING_HOUR,
+            "open": 400, "high": 401, "low": 50, "close": 60, "volume": 1,
+        }
+        now = last_time + SWING_HOUR
+
+        self.assertEqual(find_trend_bias(bars, "1h", now), find_trend_bias([*bars, live], "1h", now))
+
+    def test_insufficient_history_returns_none(self):
+        bars = swing_zigzag([[0, 100], [5, 110], [10, 105], [15, 120]])
+        self.assertIsNone(find_trend_bias(bars, "1h", bars[-1]["time"] + SWING_HOUR))
+
+
+def swing_touch_line(kind="high", segment="current", t1=100, p1=100, slope=0.01):
+    return {
+        "kind": kind,
+        "segment": segment,
+        "t1": t1,
+        "p1": p1,
+        "t2": t1 + 86400,
+        "p2": p1 + slope * 86400,
+        "slope": slope,
+        "slope_pct_per_bar": 1.0,
+        "pivots": 3,
+    }
+
+
+class SwingTouchTests(SimpleTestCase):
+    def test_wick_range_touching_a_current_line_is_reported(self):
+        biases = {
+            "1h": {
+                "direction": "bullish",
+                "lines": [
+                    swing_touch_line(kind="high", segment="prior", p1=100, slope=0),
+                    swing_touch_line(kind="high", t1=100, p1=100, slope=0.01),
+                    swing_touch_line(kind="low", t1=100, p1=90, slope=0),
+                ],
+            },
+        }
+        bar = {"time": 200, "open": 100, "high": 101, "low": 100, "close": 100.5}
+
+        touches = touches_for_bar(bar, biases)
+
+        self.assertEqual(len(touches), 1)
+        self.assertEqual(touches[0]["bias_timeframe"], "1h")
+        self.assertEqual(touches[0]["kind"], "high")
+        self.assertEqual(touches[0]["kind_label"], "upper")
+        self.assertAlmostEqual(touches[0]["level"], 101)
+
+    def test_range_must_include_the_projected_price(self):
+        biases = {"1h": {"direction": "bullish", "lines": [swing_touch_line()]}}
+        bar = {"time": 200, "open": 102, "high": 103, "low": 101.5, "close": 102}
+
+        self.assertEqual(touches_for_bar(bar, biases), [])
+
+    def test_lines_do_not_apply_before_their_anchor(self):
+        biases = {"1h": {"direction": "bullish", "lines": [swing_touch_line(t1=200)]}}
+        bar = {"time": 100, "open": 99, "high": 100, "low": 98, "close": 99}
+
+        self.assertEqual(touches_for_bar(bar, biases), [])
+
+
+class SwingDetectionApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_swing_detection_alert_is_created_with_defaults(self):
+        response = self.client.post("/api/alerts/", {
+            "symbol": "BTCUSDT", "kind": "swing_detection", "timeframe": "5m",
+        }, format="json")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["kind"], "swing_detection")
+        self.assertEqual(response.data["condition"], "cross")
+
+    def test_swing_detection_rejects_bad_timeframe_and_price(self):
+        response = self.client.post("/api/alerts/", {
+            "symbol": "BTCUSDT", "kind": "swing_detection", "timeframe": "2h",
+        }, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("timeframe", response.data)
+
+        response = self.client.post("/api/alerts/", {
+            "symbol": "BTCUSDT", "kind": "swing_detection", "timeframe": "5m",
+            "price": "100",
+        }, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("price", response.data)
+
+
+class SwingDetectionCheckerTests(TestCase):
+    def setUp(self):
+        self.alert = Alert.objects.create(
+            symbol="BTCUSDT", kind=Alert.Kind.SWING_DETECTION,
+            condition=Alert.Condition.CROSS, timeframe="5m",
+            frequency=Alert.Frequency.EVERY,
+        )
+        self.candles = {
+            ("BTCUSDT", "5m"): [self._candle(0, 99.8, 100.2)],
+            ("BTCUSDT", "1h"): [{"time": 0, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}],
+            ("BTCUSDT", "4h"): [{"time": 0, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}],
+            ("BTCUSDT", "1d"): [{"time": 0, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}],
+        }
+        self.biases = {"1h": self._bias("1h"), "4h": None, "1d": None}
+
+    @staticmethod
+    def _candle(index, low, high, close=None):
+        close = (low + high) / 2 if close is None else close
+        return {
+            "time": SWING_BAR_START + index * SWING_BAR_STEP,
+            "open": close, "high": high, "low": low, "close": close, "volume": 1,
+        }
+
+    @staticmethod
+    def _bias(timeframe="1h", kind="high", p1=100.0, slope=0.001):
+        return {
+            "timeframe": timeframe,
+            "direction": "bullish" if slope >= 0 else "bearish",
+            "lines": [{
+                "kind": kind,
+                "segment": "current",
+                "t1": SWING_BAR_START,
+                "p1": p1,
+                "t2": SWING_BAR_START + 86400,
+                "p2": p1 + slope * 86400,
+                "slope": slope,
+                "slope_pct_per_bar": 1.0,
+                "pivots": 3,
+            }],
+        }
+
+    def _closed_bars(self, symbol, timeframe, exchange, limit):
+        return self.candles.get((symbol, timeframe))
+
+    def _find_bias(self, bars, timeframe, now_seconds):
+        return self.biases.get(timeframe)
+
+    def poll(self):
+        with patch("alerts.services._closed_bars", side_effect=self._closed_bars), \
+                patch("alerts.services.find_trend_bias", side_effect=self._find_bias):
+            return check_swing_alerts()
+
+    def reload(self):
+        self.alert.refresh_from_db()
+        return self.alert
+
+    def test_first_poll_arms_then_a_wick_touch_fires_once_per_candle(self):
+        self.assertEqual(self.poll(), [])
+        alert = self.reload()
+        self.assertEqual(int(alert.last_bar_open_time.timestamp()), SWING_BAR_START)
+        self.assertEqual(TriggerEvent.objects.count(), 0)
+
+        self.candles[("BTCUSDT", "5m")].append(self._candle(1, 100.2, 100.4, close=100.3))
+        events = self.poll()
+
+        self.assertEqual(len(events), 1)
+        self.assertIn("Swing Detection - Touch", events[0].title)
+        self.assertIn("Touched: 1H upper", events[0].message)
+        self.assertIn("Bullish", events[0].message)
+        alert = self.reload()
+        self.assertEqual(int(alert.last_bar_open_time.timestamp()), SWING_BAR_START + SWING_BAR_STEP)
+        self.assertAlmostEqual(alert.last_observed_value, 100.3)
+
+        self.assertEqual(self.poll(), [])
+        self.assertEqual(TriggerEvent.objects.count(), 1)
+
+    def test_multiple_bias_touches_on_one_candle_make_one_event(self):
+        self.poll()
+        self.biases = {
+            "1h": self._bias("1h", kind="high"),
+            "4h": self._bias("4h", kind="low"),
+            "1d": None,
+        }
+        self.candles[("BTCUSDT", "5m")].append(self._candle(1, 100.2, 100.4, close=100.3))
+
+        events = self.poll()
+
+        self.assertEqual(len(events), 1)
+        self.assertIn("1H upper", events[0].message)
+        self.assertIn("4H lower", events[0].message)
+        self.assertEqual(TriggerEvent.objects.count(), 1)
+
+    def test_a_candle_without_a_touch_still_advances_the_bar_state(self):
+        self.poll()
+        self.candles[("BTCUSDT", "5m")].append(self._candle(1, 101.0, 102.0, close=101.5))
+
+        self.assertEqual(self.poll(), [])
+        self.assertEqual(
+            int(self.reload().last_bar_open_time.timestamp()),
+            SWING_BAR_START + SWING_BAR_STEP,
+        )
+
+        self.candles[("BTCUSDT", "5m")].append(self._candle(2, 100.5, 100.7, close=100.6))
+        self.assertEqual(len(self.poll()), 1)
+
+    def test_once_alert_deactivates_on_the_touch(self):
+        self.alert.frequency = Alert.Frequency.ONCE
+        self.alert.save(update_fields=["frequency"])
+        self.poll()
+        self.candles[("BTCUSDT", "5m")].append(self._candle(1, 100.2, 100.4, close=100.3))
+
+        self.poll()
+
+        self.assertFalse(self.reload().active)
+        self.assertEqual(TriggerEvent.objects.count(), 1)
+
+    def test_a_failed_bias_feed_leaves_the_alert_unarmed(self):
+        self.candles[("BTCUSDT", "1d")] = None
+
+        self.assertEqual(self.poll(), [])
+
+        self.assertIsNone(self.reload().last_bar_open_time)
+        self.assertEqual(TriggerEvent.objects.count(), 0)
+
+    def test_check_alerts_skips_swing_detection_kind(self):
         with patch("alerts.services._closed_bars") as closed_bars:
             check_alerts()
         closed_bars.assert_not_called()
