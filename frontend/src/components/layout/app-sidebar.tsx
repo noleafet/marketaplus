@@ -179,7 +179,7 @@ export default function AppSidebar(props: Props) {
     <>
       <aside
         className={cn(
-          "sticky top-0 z-30 hidden h-svh shrink-0 border-r border-sidebar-border bg-sidebar transition-[width] duration-200 lg:flex lg:flex-col",
+          "sticky top-0 z-30 hidden h-svh shrink-0 border-r border-sidebar-border bg-sidebar transition-[width] duration-200",
           collapsed ? "w-[68px]" : "w-64",
         )}
       >

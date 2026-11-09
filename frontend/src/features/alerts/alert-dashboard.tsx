@@ -390,7 +390,7 @@ export default function AlertDashboard() {
           onOpenMobileNav={() => setMobileNavOpen(true)}
         />
 
-        <main id="main-content" className="flex-1 px-4 py-5 md:px-6 md:py-6">
+        <main id="main-content" className="flex-1 px-0 pt-0 pb-6">
           <div className="flex w-full flex-col gap-0">
             <MarketWorkspace
               symbol={marketSymbol}

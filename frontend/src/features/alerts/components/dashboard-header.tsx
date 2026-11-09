@@ -7,7 +7,6 @@ import {
   LuChevronRight,
   LuMenu,
   LuMoon,
-  LuPanelLeft,
   LuSun,
   LuZap,
 } from "react-icons/lu";
@@ -26,9 +25,7 @@ export default function DashboardHeader({
   theme,
   activeAlerts,
   triggers,
-  sidebarCollapsed,
   onToggleTheme,
-  onToggleSidebar,
   onOpenMobileNav,
 }: Props) {
   const nextTheme = theme === "dark" ? "light" : "dark";
@@ -44,15 +41,6 @@ export default function DashboardHeader({
           onClick={onOpenMobileNav}
         >
           <LuMenu className="size-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="hidden size-8 lg:inline-flex"
-          aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          onClick={onToggleSidebar}
-        >
-          <LuPanelLeft className="size-4" />
         </Button>
         <Separator orientation="vertical" className="mr-1 hidden h-4 sm:block" />
         <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
