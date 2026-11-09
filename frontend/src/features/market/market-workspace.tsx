@@ -49,7 +49,14 @@ export default function MarketWorkspace({
 }: MarketWorkspaceProps) {
   const [tabState, setTabState] = useState<ChartTabsState>({ tabs: [], active: "" });
   const tabStateRef = useRef(tabState);
-  tabStateRef.current = tabState;
+  // Synced after commit, never during render: a discarded concurrent render must not leave the
+  // ref describing tab state that never reached the screen.
+  useEffect(() => { tabStateRef.current = tabState; }, [tabState]);
+  /** The pairs last mirrored up to the dashboard. `symbol` returns them one render late, so the
+   *  incoming-symbol effect must recognise both the newest and the previous echo as its own —
+   *  otherwise the two effects chase each other and the active tab flip-flops on its own. */
+  const reportedSymbol = useRef("");
+  const prevReportedSymbol = useRef("");
   /** False until the stored strip has been read; persistence waits so it cannot clobber it. */
   const [tabsReady, setTabsReady] = useState(false);
   const [tabNotice, setTabNotice] = useState("");
@@ -161,14 +168,24 @@ export default function MarketWorkspace({
   useEffect(() => {
     if (!tabsReady) return;
     try { localStorage.setItem(TAB_STORAGE_KEY, JSON.stringify(tabState)); } catch { /* Storage can be unavailable. */ }
-    if (activeTab) onSymbolChange(activeTab);
+    if (activeTab) {
+      prevReportedSymbol.current = reportedSymbol.current;
+      reportedSymbol.current = activeTab;
+      onSymbolChange(activeTab);
+    }
   }, [tabState, activeTab, onSymbolChange, tabsReady]);
 
-  // A symbol arriving from outside (the dashboard's restored pair) opens or activates a tab.
+  // A symbol arriving from outside (the dashboard's restored pair) opens or activates a tab. The
+  // pair this workspace just mirrored up is skipped: it is our own echo returning through the
+  // `symbol` prop, and acting on it would fight the persist effect above in a two-tab loop. Echoes
+  // arrive in order, so once the prop catches up to the newest reported pair the older slot is
+  // spent and can be dropped — otherwise a later genuine symbol matching it would be ignored.
   useEffect(() => {
     if (!tabsReady || !symbol) return;
     const pair = symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (!pair || pair === tabStateRef.current.active) return;
+    if (pair === reportedSymbol.current) prevReportedSymbol.current = "";
+    if (!pair || pair === tabStateRef.current.active
+      || pair === reportedSymbol.current || pair === prevReportedSymbol.current) return;
     openTab(pair);
   }, [symbol, openTab, tabsReady]);
 
