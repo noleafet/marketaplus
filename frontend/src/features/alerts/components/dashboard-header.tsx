@@ -81,7 +81,6 @@ export default function DashboardHeader({
 
         <Button
           variant="ghost"
-          size="icon"
           className="h-6 w-6 size-6"
           aria-label={`Switch to ${nextTheme} mode`}
           title={`Switch to ${nextTheme} mode`}
