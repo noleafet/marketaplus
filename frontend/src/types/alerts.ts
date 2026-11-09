@@ -1,12 +1,10 @@
 export type AlertItem = {
   id: number;
   symbol: string;
-  kind: "price" | "macd" | "pattern" | "trend_recovery" | "swing_detection";
+  kind: "price" | "pattern" | "trend_recovery" | "swing_detection";
   condition: string;
   price: string | null;
   timeframe: string;
-  rsi_timeframe?: string;
-  trend_timeframe?: string;
   note: string;
   frequency: "once" | "every";
   active: boolean;
@@ -21,11 +19,6 @@ export type AlertItem = {
   rsi_period?: number;
   rsi_oversold?: number;
   rsi_overbought?: number;
-  macd_threshold_5?: boolean;
-  macd_threshold_10?: boolean;
-  rsi_enabled?: boolean;
-  trend_enabled?: boolean;
-  trend_period?: number;
   pattern_state?: "idle" | "forming" | "entered";
   pattern_key?: string;
   pattern_bias?: string;
@@ -49,6 +42,5 @@ export type ToastItem = {
   message: string;
 };
 
-export type AlertKind = "price" | "macd" | "pattern" | "trend_recovery" | "swing_detection";
+export type AlertKind = "price" | "pattern" | "trend_recovery" | "swing_detection";
 export type RecoveryTrigger = "sma" | "ema";
-export type RsiSettings = { period: string; oversold: string; overbought: string };

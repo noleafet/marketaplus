@@ -58,8 +58,8 @@ JOBS = {
             key="alerts",
             title="Check active alerts",
             description=(
-                "Fetch current prices, MACD and RSI once and fire every active price, "
-                "MACD or line alert that matches. Equivalent to one scheduler poll."
+                "Fetch current prices and RSI values once and fire every active price "
+                "or RSI alert that matches. Equivalent to one scheduler poll."
             ),
             run=_run_alerts,
         ),

@@ -16,7 +16,7 @@ Marketa+ combines a **Next.js dashboard**, **Django REST API**, and **PostgreSQL
 - **Charts:** Candlesticks, volume, Heikin Ashi, EMA, Bollinger Bands, MACD, RSI, ATR, key levels, and 1H/4H/1D trend-bias channels.
 - **Watchlist:** Database-backed symbols, exchange selection, and optional scan columns for volume versus the previous 20-candle average, RSI-14, EMA-100, MACD line-minus-signal difference, and open interest (from the futures market).
 - **Key levels:** Nearby support/resistance zones scored from 0–100 using swing reactions, rejection, higher-timeframe confluence, volume, and recency. Only levels scoring at least 40 are displayed.
-- **Alerts:** Price, MACD cross, drawing-line, chart-pattern, trend-recovery, and swing-detection alerts. Browser notifications, sound, and optional Telegram delivery are supported.
+- **Alerts:** Price, drawing-line, chart-pattern, trend-recovery, and swing-detection alerts. Browser notifications, sound, and optional Telegram delivery are supported.
 - **Pattern monitor:** Checks the latest 50 candles every 60 seconds; identifies patterns that are forming or confirmed, projects triggers and measured targets, and saves chart snapshots.
 - **Market events:** CoinMarketCal event scraping for watchlist coins every 4 hours from 02:00 UTC, using CoinGecko coin IDs/slugs without a provider API key.
 - **Persistence:** Django stores alerts, trigger history, watchlist symbols, exchange settings, and pattern snapshots. Chart preferences and drawings remain browser-local.
@@ -138,7 +138,7 @@ npm run build
 Run from `backend/` with the environment and database configured:
 
 ```sh
-# Check price, MACD and drawing-line alerts once
+# Check price, RSI and drawing-line alerts once
 python manage.py check_alerts
 
 # Sync upcoming market events
@@ -154,7 +154,7 @@ python manage.py run_alerts
 python manage.py run_alerts --interval 10
 ```
 
-The scheduler reads active rules, fetches exchange data, records fired notifications as `TriggerEvent`, and sends enabled Telegram messages. One-shot alerts deactivate after firing; repeating price alerts use a 60-second cooldown. MACD crosses and chart patterns use completed candles and avoid replaying old signals on startup. Network/API errors are logged and retried on the next run.
+The scheduler reads active rules, fetches exchange data, records fired notifications as `TriggerEvent`, and sends enabled Telegram messages. One-shot alerts deactivate after firing; repeating price alerts use a 60-second cooldown. Candle-based alerts use completed candles and avoid replaying old signals on startup. Network/API errors are logged and retried on the next run.
 
 ## API overview
 
@@ -195,19 +195,7 @@ Full schema: http://localhost:8000/api/schema/
 }
 ```
 
-**MACD cross**
-
-```json
-{
-  "symbol": "ETHUSDT",
-  "kind": "macd",
-  "condition": "cross_down",
-  "timeframe": "1h",
-  "frequency": "every"
-}
-```
-
-Supported intervals: `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w`. MACD uses EMA periods 12/26/9 seeded with an SMA.
+Supported intervals: `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w`.
 
 ## Configuration and security
 

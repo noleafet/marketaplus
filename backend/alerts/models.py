@@ -132,7 +132,6 @@ class MarketEvent(models.Model):
 class Alert(models.Model):
     class Kind(models.TextChoices):
         PRICE = "price", "Price"
-        MACD = "macd", "MACD cross"
         RSI = "rsi", "RSI"
         PATTERN = "pattern", "Chart pattern"
         TREND_RECOVERY = "trend_recovery", "Trend recovery"
@@ -160,33 +159,17 @@ class Alert(models.Model):
     condition = models.CharField(max_length=12, choices=Condition.choices)
     price = models.DecimalField(max_digits=30, decimal_places=12, null=True, blank=True)
     timeframe = models.CharField(max_length=3, blank=True, default="")
-    rsi_timeframe = models.CharField(
-        max_length=3, blank=True, default="",
-        help_text="Timeframe for the RSI context; blank follows the MACD timeframe",
-    )
-    trend_timeframe = models.CharField(
-        max_length=3, blank=True, default="1h",
-        help_text="Timeframe for the EMA trend context (defaults to 1h)",
-    )
     note = models.CharField(max_length=240, blank=True, default="")
     frequency = models.CharField(max_length=8, choices=Frequency.choices, default=Frequency.ONCE)
     active = models.BooleanField(default=True, db_index=True)
     last_triggered_at = models.DateTimeField(null=True, blank=True)
     last_observed_value = models.FloatField(null=True, blank=True)
     last_bar_open_time = models.DateTimeField(null=True, blank=True)
-    last_macd_diff = models.FloatField(null=True, blank=True)
-    last_macd_gap_percent = models.FloatField(null=True, blank=True)
-    last_macd_warning_threshold = models.PositiveSmallIntegerField(null=True, blank=True)
     cooldown_seconds = models.PositiveIntegerField(default=60)
     rsi_period = models.PositiveSmallIntegerField(default=14, null=True, blank=True)
     rsi_oversold = models.FloatField(default=30, null=True, blank=True)
     rsi_overbought = models.FloatField(default=70, null=True, blank=True)
     last_rsi_value = models.FloatField(null=True, blank=True)
-    macd_threshold_5 = models.BooleanField(default=False, help_text="Enable 5% MACD cross approach threshold")
-    macd_threshold_10 = models.BooleanField(default=False, help_text="Enable 10% MACD cross approach threshold")
-    rsi_enabled = models.BooleanField(default=True, help_text="Enable RSI context by default")
-    trend_enabled = models.BooleanField(default=True, help_text="Enable EMA trend context by default")
-    trend_period = models.PositiveSmallIntegerField(default=100, null=True, blank=True, help_text="EMA period for the trend filter (defaults to the 100 EMA)")
 
     # Chart-pattern alerts walk one shape through idle -> forming -> idle. The forming
     # event pins the numbers the entry event has to repeat, so a sloped neckline is stored
@@ -254,19 +237,8 @@ class Alert(models.Model):
     class Meta:
         ordering = ["-created_at"]
 
-    @property
-    def effective_rsi_timeframe(self):
-        """RSI follows the MACD timeframe unless the alert stores its own interval."""
-        return self.rsi_timeframe or self.timeframe
-
-    @property
-    def effective_trend_timeframe(self):
-        return self.trend_timeframe or "1h"
-
     def __str__(self):
-        if self.kind == self.Kind.MACD:
-            target = f"MACD {self.timeframe}"
-        elif self.kind == self.Kind.RSI:
+        if self.kind == self.Kind.RSI:
             target = f"RSI {self.timeframe}"
         elif self.kind == self.Kind.PATTERN:
             target = f"pattern {self.pattern_key or 'any'} {self.timeframe}"

@@ -65,40 +65,27 @@ export default function AlertList({
                 <div className="alert-title">
                   <b>{item.symbol}</b>
                   <span className="tag">
-                    {item.kind === "macd"
-                      ? `MACD · ${item.timeframe}${item.rsi_enabled ? ` + RSI ${item.rsi_timeframe || item.timeframe}` : ""}${item.trend_enabled ? ` + Trend ${item.trend_timeframe || "1h"}` : ""}`
-                      : item.kind === "swing_detection"
-                        ? `SWING · ${item.timeframe}`
-                        : item.kind === "pattern"
-                        ? `PATTERN · ${item.timeframe}`
-                        : item.kind === "trend_recovery"
-                          ? `TREND RECOVERY · 1h`
-                          : item.line_type
-                          ? "DRAWING"
-                          : "PRICE"}
+                    {item.kind === "swing_detection"
+                      ? `SWING · ${item.timeframe}`
+                      : item.kind === "pattern"
+                      ? `PATTERN · ${item.timeframe}`
+                      : item.kind === "trend_recovery"
+                        ? `TREND RECOVERY · 1h`
+                        : item.line_type
+                        ? "DRAWING"
+                        : "PRICE"}
                   </span>
                 </div>
                 <p>
-                  {item.kind === "macd"
-                    ? `MACD ${conditions[item.condition]} signal${
-                        item.macd_threshold_5 || item.macd_threshold_10
-                          ? ` (thresholds: ${[
-                              item.macd_threshold_5 && "5%",
-                              item.macd_threshold_10 && "10%",
-                            ]
-                              .filter(Boolean)
-                              .join(", ")})`
-                          : ""
-                      } · RSI ${item.rsi_timeframe || item.timeframe} · EMA ${item.trend_period || 100}/${item.trend_timeframe || "1h"}`
-                    : item.kind === "swing_detection"
-                      ? `Wick touch of a current 1H/4H/1D trend-bias diagonal · one notice per ${item.timeframe} candle`
-                      : item.kind === "pattern"
-                      ? patternProgress(item)
-                      : item.kind === "trend_recovery"
-                        ? `1D/4H MACD trend filter · 1h ${recoveryTriggers[item.recovery_trigger ?? "sma"] ?? "SMA 3/10"} trigger · bullish recovery + bearish reversal`
-                        : item.line_type
-                        ? `${conditions[item.condition]} drawing level`
-                        : `${conditions[item.condition]} ${Number(item.price).toLocaleString()}`}
+                  {item.kind === "swing_detection"
+                    ? `Wick touch of a current 1H/4H/1D trend-bias diagonal · one notice per ${item.timeframe} candle`
+                    : item.kind === "pattern"
+                    ? patternProgress(item)
+                    : item.kind === "trend_recovery"
+                      ? `1D/4H MACD trend filter · 1h ${recoveryTriggers[item.recovery_trigger ?? "sma"] ?? "SMA 3/10"} trigger · bullish recovery + bearish reversal`
+                      : item.line_type
+                      ? `${conditions[item.condition]} drawing level`
+                      : `${conditions[item.condition]} ${Number(item.price).toLocaleString()}`}
                   {item.note ? <span className="note"> · {item.note}</span> : null}
                 </p>
                 <small>

@@ -9,7 +9,7 @@ from .models import Alert, MarketEvent, PatternShot, TriggerEvent, WatchlistSymb
 
 TIMEFRAMES = {"1m", "5m", "15m", "1h", "4h", "1d", "1w"}
 PRICE_CONDITIONS = {"cross_up", "cross_down", "cross", "above", "below"}
-MACD_CONDITIONS = {"cross_up", "cross_down", "cross"}
+CROSS_CONDITIONS = {"cross_up", "cross_down", "cross"}
 # Mirrors the pattern keys offered by the chart's pattern analysis.
 PATTERN_KEYS = {
     "head_and_shoulders", "inverse_head_and_shoulders", "double_top", "double_bottom",
@@ -35,13 +35,11 @@ class AlertSerializer(serializers.ModelSerializer):
     class Meta:
         model = Alert
         fields = [
-            "id", "symbol", "kind", "condition", "price", "timeframe", "rsi_timeframe",
-            "trend_timeframe", "note", "frequency", "active", "cooldown_seconds",
+            "id", "symbol", "kind", "condition", "price", "timeframe", "note",
+            "frequency", "active", "cooldown_seconds",
             "line_type", "line_t1", "line_price1", "line_t2", "line_price2",
             "line_extend", "created_at", "updated_at", "last_triggered_at", "rsi_period",
-            "rsi_oversold", "rsi_overbought", "last_rsi_value", "macd_threshold_5",
-            "macd_threshold_10", "rsi_enabled", "trend_enabled",
-            "trend_period",
+            "rsi_oversold", "rsi_overbought", "last_rsi_value",
             "pattern_state", "pattern_key", "pattern_bias", "pattern_target",
             "pattern_last_bar_time", "recovery_trigger", "recovery_last_bar_time",
         ]
@@ -62,34 +60,6 @@ class AlertSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Price must be greater than zero.")
         return value
 
-    def _validate_rsi_context(self, attrs):
-        if not attrs.get("rsi_enabled", getattr(self.instance, "rsi_enabled", True)):
-            return
-        rsi_period = attrs.get("rsi_period", getattr(self.instance, "rsi_period", 14))
-        if rsi_period is not None and (rsi_period < 2 or rsi_period > 100):
-            raise serializers.ValidationError({"rsi_period": "RSI period must be between 2 and 100."})
-        rsi_oversold = attrs.get("rsi_oversold", getattr(self.instance, "rsi_oversold", 30))
-        if rsi_oversold is not None and (rsi_oversold < 0 or rsi_oversold > 100):
-            raise serializers.ValidationError({"rsi_oversold": "RSI oversold must be between 0 and 100."})
-        rsi_overbought = attrs.get("rsi_overbought", getattr(self.instance, "rsi_overbought", 70))
-        if rsi_overbought is not None and (rsi_overbought < 0 or rsi_overbought > 100):
-            raise serializers.ValidationError({"rsi_overbought": "RSI overbought must be between 0 and 100."})
-        if rsi_oversold is not None and rsi_overbought is not None and rsi_oversold >= rsi_overbought:
-            raise serializers.ValidationError({"rsi_oversold": "RSI oversold must be less than overbought."})
-
-    def _apply_rsi_timeframe_default(self, attrs, timeframe):
-        """RSI follows the alert timeframe until an explicit interval is stored."""
-        if self.instance is None:
-            if not attrs.get("rsi_timeframe"):
-                attrs["rsi_timeframe"] = timeframe
-            return
-        if "timeframe" not in attrs or "rsi_timeframe" in attrs:
-            return
-        previous_timeframe = getattr(self.instance, "timeframe", "")
-        previous_rsi_timeframe = getattr(self.instance, "rsi_timeframe", "")
-        if not previous_rsi_timeframe or previous_rsi_timeframe == previous_timeframe:
-            attrs["rsi_timeframe"] = timeframe
-
     def validate(self, attrs):
         kind = attrs.get("kind", getattr(self.instance, "kind", Alert.Kind.PRICE))
         condition = attrs.get("condition", getattr(self.instance, "condition", ""))
@@ -100,7 +70,7 @@ class AlertSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"price": "A price or line geometry is required."})
             line_type = attrs.get("line_type", getattr(self.instance, "line_type", ""))
             if line_type:
-                if condition not in MACD_CONDITIONS:
+                if condition not in CROSS_CONDITIONS:
                     raise serializers.ValidationError({"condition": "Line alerts support cross_up, cross_down, or cross."})
                 t1 = attrs.get("line_t1", getattr(self.instance, "line_t1", None))
                 p1 = attrs.get("line_price1", getattr(self.instance, "line_price1", None))
@@ -111,40 +81,6 @@ class AlertSerializer(serializers.ModelSerializer):
                     p2 = attrs.get("line_price2", getattr(self.instance, "line_price2", None))
                     if t2 is None or p2 is None or t1 == t2:
                         raise serializers.ValidationError({"line_t2": "Trendlines and rays require two distinct time/price points."})
-        elif kind == Alert.Kind.MACD:
-            if condition not in MACD_CONDITIONS:
-                raise serializers.ValidationError({"condition": "MACD supports cross_up, cross_down, or cross."})
-            timeframe = attrs.get("timeframe", getattr(self.instance, "timeframe", ""))
-            if timeframe not in TIMEFRAMES:
-                raise serializers.ValidationError({"timeframe": f"Choose one of {', '.join(sorted(TIMEFRAMES))}."})
-            rsi_timeframe = attrs.get(
-                "rsi_timeframe", getattr(self.instance, "rsi_timeframe", ""),
-            )
-            if rsi_timeframe and rsi_timeframe not in TIMEFRAMES:
-                raise serializers.ValidationError({
-                    "rsi_timeframe": f"Choose one of {', '.join(sorted(TIMEFRAMES))}.",
-                })
-            trend_timeframe = attrs.get(
-                "trend_timeframe", getattr(self.instance, "trend_timeframe", "1h"),
-            )
-            if not trend_timeframe:
-                trend_timeframe = "1h"
-                attrs["trend_timeframe"] = "1h"
-            if trend_timeframe not in TIMEFRAMES:
-                raise serializers.ValidationError({
-                    "trend_timeframe": f"Choose one of {', '.join(sorted(TIMEFRAMES))}.",
-                })
-            # RSI follows the MACD timeframe by default, including when only the MACD
-            # timeframe is changed later. An explicit RSI timeframe stays put.
-            self._apply_rsi_timeframe_default(attrs, timeframe)
-            if attrs.get("line_type", ""):
-                raise serializers.ValidationError({"line_type": "Line alerts are only available for price alerts."})
-            self._validate_rsi_context(attrs)
-            # Validate trend filter fields if the trend filter is enabled for MACD alert
-            if attrs.get("trend_enabled", getattr(self.instance, "trend_enabled", True)):
-                trend_period = attrs.get("trend_period", getattr(self.instance, "trend_period", 100))
-                if trend_period is not None and (trend_period < 2 or trend_period > 500):
-                    raise serializers.ValidationError({"trend_period": "Trend EMA period must be between 2 and 500."})
         elif kind == Alert.Kind.PATTERN:
             timeframe = attrs.get("timeframe", getattr(self.instance, "timeframe", ""))
             if timeframe not in TIMEFRAMES:
@@ -195,18 +131,18 @@ class AlertSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"line_type": "Line alerts are only available for price alerts."})
             attrs["condition"] = Alert.Condition.CROSS
         elif kind == Alert.Kind.RSI:
-            raise serializers.ValidationError({"kind": "RSI alerts are only available as a confirmation option for MACD alerts. Create a MACD alert and enable its RSI context."})
+            raise serializers.ValidationError({"kind": "RSI alerts are managed in Django admin."})
         return attrs
 
     # Changing what an alert watches, or waking it after a pause, makes its stored readings
     # stale: comparing them with fresh ones would report a cross that never happened.
     REARM_FIELDS = (
-        "symbol", "kind", "condition", "timeframe", "rsi_timeframe", "rsi_period",
+        "symbol", "kind", "condition", "timeframe", "rsi_period",
         "recovery_trigger",
     )
     STATE_FIELDS = (
-        "last_observed_value", "last_bar_open_time", "last_macd_diff", "last_macd_gap_percent",
-        "last_macd_warning_threshold", "last_rsi_value", "recovery_last_bar_time",
+        "last_observed_value", "last_bar_open_time", "last_rsi_value",
+        "recovery_last_bar_time",
     )
 
     def update(self, instance, validated_data):

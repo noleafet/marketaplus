@@ -7,11 +7,7 @@ import MarketWorkspace from "@/features/market/market-workspace";
 import AppSidebar from "@/components/layout/app-sidebar";
 import type { AlertItem, AlertKind, EventItem, RecoveryTrigger, ToastItem } from "@/types/alerts";
 import type { Drawing, Exchange } from "@/types/market";
-import {
-  contextTimeframes, defaultRsiSettings, timeframes,
-  type ContextTimeframe,
-} from "./constants";
-import { macdFieldErrors } from "./validation";
+import { timeframes } from "./constants";
 import AlertForm, { type AlertFormModel } from "./components/alert-form";
 import AlertList from "./components/alert-list";
 import ActivityLog from "./components/activity-log";
@@ -29,20 +25,9 @@ export default function AlertDashboard() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activeSection, setActiveSection] = useState("market");
   const [targetPrice, setTargetPrice] = useState("");
-  const [macdTimeframe, setMacdTimeframe] = useState<(typeof timeframes)[number]>("1h");
-  const [rsiTimeframe, setRsiTimeframe] = useState<ContextTimeframe>("1h");
-  const [trendTimeframe, setTrendTimeframe] = useState<ContextTimeframe>("1h");
-  const rsiTimeframeTouched = useRef(false);
-  const [macdThreshold5, setMacdThreshold5] = useState(false);
-  const [macdThreshold10, setMacdThreshold10] = useState(false);
-  const [rsiEnabled, setRsiEnabled] = useState(true);
-  const [rsiSettings, setRsiSettings] = useState(defaultRsiSettings);
-  const [trendEnabled, setTrendEnabled] = useState(true);
-  const [trendPeriod, setTrendPeriod] = useState("100");
   const [patternTimeframe, setPatternTimeframe] = useState<(typeof timeframes)[number]>("1h");
   const [swingTimeframe, setSwingTimeframe] = useState<(typeof timeframes)[number]>("1h");
   const [recoveryTrigger, setRecoveryTrigger] = useState<RecoveryTrigger>("sma");
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [notificationAvailable, setNotificationAvailable] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [clearedThrough, setClearedThrough] = useState("");
@@ -204,20 +189,8 @@ export default function AlertDashboard() {
     return () => window.clearInterval(timer);
   }, [refresh]);
 
-  function changeMacdTimeframe(next: (typeof timeframes)[number]) {
-    setMacdTimeframe(next);
-    // RSI follows the MACD interval until the user picks a different RSI interval.
-    if (!rsiTimeframeTouched.current && contextTimeframes.includes(next as ContextTimeframe)) {
-      setRsiTimeframe(next as ContextTimeframe);
-    }
-  }
-  function changeRsiTimeframe(next: ContextTimeframe) {
-    rsiTimeframeTouched.current = true;
-    setRsiTimeframe(next);
-  }
-
   async function createAlert(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setError(""); setFieldErrors({});
+    event.preventDefault(); setBusy(true); setError("");
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const payload: Record<string, string | number | boolean> = {
@@ -228,23 +201,6 @@ export default function AlertDashboard() {
     if (kind === "price") {
       payload.condition = String(form.get("condition"));
       payload.price = Number(form.get("price"));
-    } else if (kind === "macd") {
-      payload.timeframe = macdTimeframe;
-      payload.rsi_timeframe = rsiTimeframe;
-      payload.trend_timeframe = trendTimeframe;
-      payload.condition = "cross";
-      payload.macd_threshold_5 = macdThreshold5;
-      payload.macd_threshold_10 = macdThreshold10;
-      payload.rsi_enabled = rsiEnabled;
-      if (rsiEnabled) {
-        payload.rsi_period = Number(rsiSettings.period);
-        payload.rsi_oversold = Number(rsiSettings.oversold);
-        payload.rsi_overbought = Number(rsiSettings.overbought);
-      }
-      payload.trend_enabled = trendEnabled;
-      if (trendEnabled) payload.trend_period = Number(trendPeriod);
-      const errors = macdFieldErrors({ rsiEnabled, rsi: rsiSettings, trendEnabled, trendPeriod });
-      if (Object.keys(errors).length) { setFieldErrors(errors); setBusy(false); return; }
     } else if (kind === "trend_recovery") {
       payload.timeframe = "1h";
       payload.condition = "cross";
@@ -264,13 +220,8 @@ export default function AlertDashboard() {
   }
 
   function resetForm() {
-    setTargetPrice(""); setMacdTimeframe("1h");
-    setMacdThreshold5(false); setMacdThreshold10(false);
-    rsiTimeframeTouched.current = false;
-    setRsiTimeframe("1h"); setTrendTimeframe("1h");
-    setRsiEnabled(true); setRsiSettings(defaultRsiSettings);
-    setTrendEnabled(true); setTrendPeriod("100");
-    setPatternTimeframe("1h"); setSwingTimeframe("1h"); setRecoveryTrigger("sma"); setFieldErrors({});
+    setTargetPrice("");
+    setPatternTimeframe("1h"); setSwingTimeframe("1h"); setRecoveryTrigger("sma");
   }
 
   async function toggleAlert(item: AlertItem) {
@@ -320,16 +271,6 @@ export default function AlertDashboard() {
     if ("Notification" in window) void Notification.requestPermission();
   }
   const activeCount = alerts.filter((item) => item.active).length;
-  const macdSummary = (() => {
-    const warnings = [macdThreshold5 ? "5%" : "", macdThreshold10 ? "10%" : ""].filter(Boolean);
-    const parts = [`Notify when the ${marketSymbol || "selected pair"} MACD (${macdTimeframe}) crosses the signal line in either direction.`];
-    parts.push(warnings.length
-      ? ` Early warning at ${warnings.join(" and ")} of ATR.`
-      : " No early warning.");
-    parts.push(` RSI context: ${rsiSettings.period || "14"} period on ${rsiTimeframe}, ${rsiSettings.oversold || "30"} oversold / ${rsiSettings.overbought || "70"} overbought.`);
-    parts.push(` Trend context: ${trendPeriod || "100"} EMA on ${trendTimeframe}.`);
-    return parts.join("");
-  })();
   const patternSummary = `Watch the last 50 ${patternTimeframe} candles of ${marketSymbol || "the selected pair"} for a chart pattern. Notify while a shape is forming with the entry, invalidation and target it pins, then again when a completed candle closes through that entry at the same target.`;
   const recoverySummary = `Watch ${marketSymbol || "the selected pair"} on closed 1h candles. When the 1D EMA 19/39 and 4H EMA 12/26 MACDs agree on the trend, warn early as the 1h MACD (${recoveryTrigger === "ema" ? "EMA 12/100" : "SMA 3/10"}) recovers from a 3+ bar pullback through zero, then confirm on the zero-line cross. Bullish recoveries and bearish reversals are tracked as separate cycles.`;
   const swingSummary = `Watch closed ${swingTimeframe} candles of ${marketSymbol || "the selected pair"}. Notify once per candle when its wick touches a current projected Trend Bias diagonal from the 1H, 4H or 1D reading.`;
@@ -340,24 +281,6 @@ export default function AlertDashboard() {
     onMarketSymbolChange: setMarketSymbol,
     targetPrice,
     onTargetPriceChange: setTargetPrice,
-    macdTimeframe,
-    onMacdTimeframeChange: changeMacdTimeframe,
-    macdThreshold5,
-    onMacdThreshold5Change: setMacdThreshold5,
-    macdThreshold10,
-    onMacdThreshold10Change: setMacdThreshold10,
-    rsiEnabled,
-    onRsiEnabledChange: setRsiEnabled,
-    rsiTimeframe,
-    onRsiTimeframeChange: changeRsiTimeframe,
-    rsiSettings,
-    onRsiSettingsChange: setRsiSettings,
-    trendEnabled,
-    onTrendEnabledChange: setTrendEnabled,
-    trendTimeframe,
-    onTrendTimeframeChange: setTrendTimeframe,
-    trendPeriod,
-    onTrendPeriodChange: setTrendPeriod,
     patternTimeframe,
     onPatternTimeframeChange: setPatternTimeframe,
     swingTimeframe,
@@ -367,9 +290,7 @@ export default function AlertDashboard() {
     patternSummary,
     swingSummary,
     recoverySummary,
-    fieldErrors,
     busy,
-    macdSummary,
   };
   const notificationsGranted =
     notificationAvailable && Notification.permission === "granted";

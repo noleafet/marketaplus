@@ -26,7 +26,6 @@ from .trend_bias import find_trend_bias
 logger = logging.getLogger(__name__)
 TIMEFRAME_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800}
 BYBIT_INTERVALS = {"1m": "1", "5m": "5", "15m": "15", "1h": "60", "4h": "240", "1d": "D", "1w": "W"}
-VOLUME_AVERAGE_BARS = 20
 
 
 def _market_request(path, params, exchange):
@@ -114,71 +113,6 @@ def _closed_bars(symbol, timeframe, exchange, limit=500):
     } for candle in candles if int(candle[6]) < now_ms]
 
 
-def _volume_percent(closed):
-    """Latest closed candle's volume as a percentage of the previous 20 candles."""
-    if len(closed) < VOLUME_AVERAGE_BARS + 1:
-        return None
-    baseline = [float(candle[5]) for candle in closed[-VOLUME_AVERAGE_BARS - 1:-1]]
-    average = sum(baseline) / len(baseline)
-    if average <= 0:
-        return None
-    return float(closed[-1][5]) / average * 100
-
-
-def _ema_series(values, length):
-    result = [None] * len(values)
-    seed = []
-    start = None
-    alpha = 2 / (length + 1)
-    for index, value in enumerate(values):
-        if value is None:
-            continue
-        if start is None:
-            start = index
-        offset = index - start
-        if offset < length:
-            seed.append(value)
-            if offset == length - 1:
-                result[index] = sum(seed) / length
-        else:
-            result[index] = value * alpha + result[index - 1] * (1 - alpha)
-    return result
-
-
-def _macd_signal(symbol, timeframe, exchange):
-    candles = _candles_for(symbol, timeframe, exchange, 300)
-    now_ms = int(time.time() * 1000)
-    closed = [candle for candle in candles if int(candle[6]) < now_ms]
-    if len(closed) < 37:
-        return None
-    closes = [float(candle[4]) for candle in closed]
-    fast, slow = _ema_series(closes, 12), _ema_series(closes, 26)
-    macd_line = [f - s if f is not None and s is not None else None for f, s in zip(fast, slow)]
-    signal = _ema_series(macd_line, 9)
-    index = len(closed) - 1
-    if any(value is None for value in (macd_line[index - 1], signal[index - 1], macd_line[index], signal[index])):
-        return None
-    true_ranges = []
-    for candle_index in range(len(closed)):
-        candle = closed[candle_index]
-        high, low = float(candle[2]), float(candle[3])
-        previous_close = float(closed[candle_index - 1][4]) if candle_index else closes[candle_index]
-        true_ranges.append(max(high - low, abs(high - previous_close), abs(low - previous_close)))
-    atr = sum(true_ranges[:14]) / 14
-    for true_range in true_ranges[14:]:
-        atr = (atr * 13 + true_range) / 14
-    return {
-        "bar_time": datetime.fromtimestamp(int(closed[index][0]) / 1000, tz=dt_timezone.utc),
-        "previous_diff": macd_line[index - 1] - signal[index - 1],
-        "current_diff": macd_line[index] - signal[index],
-        "close": closes[index],
-        "macd": macd_line[index],
-        "signal": signal[index],
-        "atr": atr,
-        "volume_percent": _volume_percent(closed),
-    }
-
-
 def _rsi_signal(symbol, timeframe, exchange, period=14):
     candles = _candles_for(symbol, timeframe, exchange, 500)
     now_ms = int(time.time() * 1000)
@@ -213,53 +147,6 @@ def _rsi_signal(symbol, timeframe, exchange, period=14):
         "rsi": rsi,
         "close": closes[index],
     }
-
-
-def _ema(values, period):
-    """Exponential moving average seeded with the SMA of the first `period` values."""
-    ema = sum(values[:period]) / period
-    multiplier = 2 / (period + 1)
-    for value in values[period:]:
-        ema = (value - ema) * multiplier + ema
-    return ema
-
-
-def _trend_signal(symbol, timeframe, exchange, period=100):
-    candles = _candles_for(symbol, timeframe, exchange, max(period + 100, 500))
-    now_ms = int(time.time() * 1000)
-    closed = [candle for candle in candles if int(candle[6]) < now_ms]
-    if len(closed) < period:
-        return None
-    closes = [float(candle[4]) for candle in closed]
-    ema = _ema(closes, period)
-    index = len(closed) - 1
-    return {
-        "bar_time": datetime.fromtimestamp(int(closed[index][0]) / 1000, tz=dt_timezone.utc),
-        "ema": ema,
-        "close": closes[index],
-        "trend": "uptrend" if closes[index] >= ema else "downtrend",
-    }
-
-
-def _rsi_classification(alert, rsi):
-    """Classify RSI momentum as bullish or bearish, adding a balanced qualifier near the middle. Informational only."""
-    value = rsi["rsi"]
-    if value >= (70 if alert.rsi_overbought is None else alert.rsi_overbought):
-        return "bullish"
-    if value <= (30 if alert.rsi_oversold is None else alert.rsi_oversold):
-        return "bearish"
-    return "bullish-balanced" if value >= 50 else "bearish-balanced"
-
-
-def _trend_classification(alert, trend):
-    """Classify price relative to the EMA as bullish or bearish, adding a balanced qualifier near the EMA. Informational only — never blocks a MACD alert."""
-    close, ema = trend["close"], trend["ema"]
-    tolerance = ema * 0.001  # within 0.1% of the EMA counts as balanced
-    if close > ema + tolerance:
-        return "bullish"
-    if close < ema - tolerance:
-        return "bearish"
-    return "bullish-balanced" if close >= ema else "bearish-balanced"
 
 
 def _format_number(value, decimals=2):
@@ -297,43 +184,6 @@ def _report_url(alert, bar_time, *, subject=None):
     return url
 
 
-def _rsi_line(alert, rsi):
-    timeframe = alert.effective_rsi_timeframe
-    if not rsi:
-        return f"RSI ({timeframe}): –"
-    state = _rsi_classification(alert, rsi).title()
-    return f"RSI ({timeframe}): {rsi['rsi']:.0f} {state}"
-
-
-def _trend_line(alert, trend):
-    period = alert.trend_period or 100
-    timeframe = alert.effective_trend_timeframe
-    if not trend:
-        return f"EMA {period} ({timeframe}): –"
-    state = _trend_classification(alert, trend).title()
-    return f"EMA {period} ({timeframe}): {_format_indicator(trend['ema'])} {state}"
-
-
-def _volume_line(volume_percent):
-    if volume_percent is None or not math.isfinite(volume_percent):
-        return "Volume: –"
-    return f"Volume: {volume_percent:.0f}%"
-
-
-def _macd_alert_message(alert, macd, *, status, rsi, trend, distance=None, subject=None):
-    lines = [f"Status: {status.capitalize()}"]
-    if distance is not None:
-        lines.append(f"Distance: {distance:.2f}%")
-    lines.extend([
-        f"Current Price: {_format_price(macd['close'])}",
-        _rsi_line(alert, rsi),
-        _trend_line(alert, trend),
-        _volume_line(macd.get("volume_percent")),
-        f"Report: {_report_url(alert, macd['bar_time'], subject=subject)}",
-    ])
-    return "\n".join(lines)
-
-
 def _line_level(alert, at):
     if not alert.line_type or alert.line_price1 is None:
         return float(alert.price) if alert.price is not None else None
@@ -363,33 +213,6 @@ def _crossed(condition, previous, current):
     if condition == Alert.Condition.CROSS_DOWN:
         return down
     return up or down
-
-
-MACD_APPROACH_REARM_PERCENT = 15
-
-
-def _macd_approach_thresholds(previous, current, previous_gap_percent, current_gap_percent, condition, previous_threshold):
-    """Return newly reached proximity bands and the current approach state."""
-    if previous is None or current == 0 or previous_gap_percent is None or current_gap_percent is None:
-        return [], None
-    if previous * current <= 0:
-        # The lines crossed, so the next approach starts fresh.
-        return [], None
-    if current_gap_percent >= previous_gap_percent:
-        # A widening bar keeps the bands already reported, so a wobble around a band does not
-        # repeat its warning. Drifting well clear of every band re-arms them.
-        return [], (None if current_gap_percent > MACD_APPROACH_REARM_PERCENT else previous_threshold)
-    if (current < 0 and condition == Alert.Condition.CROSS_DOWN) or (
-        current > 0 and condition == Alert.Condition.CROSS_UP
-    ):
-        return [], None
-
-    reached = [
-        threshold for threshold in (10, 5)
-        if current_gap_percent <= threshold and (previous_threshold is None or threshold < previous_threshold)
-    ]
-    current_threshold = min(reached) if reached else previous_threshold
-    return reached, current_threshold
 
 
 def _may_fire(alert, now):
@@ -505,65 +328,39 @@ def check_alerts(*, stdout=None):
     """Fetch current market values, persist alert state/events, and notify on hits."""
     configuration = AppConfiguration.load()
     exchange = Exchange.load()
-    # Pattern and trend-recovery alerts run on their own scheduler jobs
-    # (check_pattern_alerts, check_recovery_alerts).
+    # Pattern, trend-recovery and swing-detection alerts run on their own scheduler jobs
+    # (check_pattern_alerts, check_recovery_alerts, check_swing_alerts).
     alerts = list(
-        Alert.objects.filter(active=True)
-        .exclude(kind__in=[
-            Alert.Kind.PATTERN, Alert.Kind.TREND_RECOVERY, Alert.Kind.SWING_DETECTION,
-        ])
+        Alert.objects.filter(active=True, kind__in=[Alert.Kind.PRICE, Alert.Kind.RSI])
         .order_by("id")
     )
     price_symbols = {a.symbol for a in alerts if a.kind == Alert.Kind.PRICE}
-    macd_keys = {(a.symbol, a.timeframe) for a in alerts if a.kind == Alert.Kind.MACD}
-    # MACD alerts always report RSI and the EMA trend in their message, even when the
-    # separate confirmation toggles are off.
     rsi_keys = {
-        (a.symbol, a.effective_rsi_timeframe, a.rsi_period or 14)
-        for a in alerts if a.kind in {Alert.Kind.RSI, Alert.Kind.MACD}
+        (a.symbol, a.timeframe, a.rsi_period or 14)
+        for a in alerts if a.kind == Alert.Kind.RSI
     }
-    trend_keys = {
-        (a.symbol, a.effective_trend_timeframe, a.trend_period or 100)
-        for a in alerts if a.kind == Alert.Kind.MACD
-    }
-    prices, macd_values, rsi_values, trend_values = {}, {}, {}, {}
+    prices, rsi_values = {}, {}
     for symbol in sorted(price_symbols):
         try:
             prices[symbol] = _price_for(symbol, exchange)
         except (requests.RequestException, KeyError, ValueError) as exc:
             logger.warning("Could not fetch %s price: %s", symbol, exc)
-    for symbol, timeframe in sorted(macd_keys):
-        try:
-            macd_values[(symbol, timeframe)] = _macd_signal(symbol, timeframe, exchange)
-        except (requests.RequestException, KeyError, ValueError) as exc:
-            logger.warning("Could not fetch %s %s MACD: %s", symbol, timeframe, exc)
     for symbol, timeframe, period in sorted(rsi_keys):
         try:
             rsi_values[(symbol, timeframe, period)] = _rsi_signal(symbol, timeframe, exchange, period)
         except (requests.RequestException, KeyError, ValueError) as exc:
             logger.warning("Could not fetch %s %s RSI: %s", symbol, timeframe, exc)
-    for symbol, timeframe, period in sorted(trend_keys):
-        try:
-            trend_values[(symbol, timeframe, period)] = _trend_signal(symbol, timeframe, exchange, period)
-        except (requests.RequestException, KeyError, ValueError) as exc:
-            logger.warning("Could not fetch %s %s trend: %s", symbol, timeframe, exc)
 
     fired = []
     now = timezone.now()
     for snapshot in alerts:
         value = prices.get(snapshot.symbol) if snapshot.kind == Alert.Kind.PRICE else None
-        macd = macd_values.get((snapshot.symbol, snapshot.timeframe)) if snapshot.kind == Alert.Kind.MACD else None
         rsi = rsi_values.get((
-            snapshot.symbol, snapshot.effective_rsi_timeframe, snapshot.rsi_period or 14,
-        )) if snapshot.kind in {Alert.Kind.RSI, Alert.Kind.MACD} else None
-        trend = trend_values.get((
-            snapshot.symbol, snapshot.effective_trend_timeframe, snapshot.trend_period or 100,
-        )) if snapshot.kind == Alert.Kind.MACD else None
+            snapshot.symbol, snapshot.timeframe, snapshot.rsi_period or 14,
+        )) if snapshot.kind == Alert.Kind.RSI else None
         if snapshot.kind == Alert.Kind.PRICE and value is None:
             continue
         if snapshot.kind == Alert.Kind.RSI and rsi is None:
-            continue
-        if snapshot.kind == Alert.Kind.MACD and macd is None:
             continue
         alert_fired = []
         try:
@@ -593,65 +390,6 @@ def check_alerts(*, stdout=None):
                             message=f"Last price {value:g}; target {level:g}" + (f" — {alert.note}" if alert.note else ""),
                             observed_value=value,
                         )
-                elif alert.kind == Alert.Kind.MACD:
-                    bar_time = macd["bar_time"]
-                    if alert.last_bar_open_time is None:
-                        # Arm at the latest closed candle; never report an old cross on first startup.
-                        alert.last_bar_open_time = bar_time
-                        alert.last_macd_diff = macd["current_diff"]
-                        atr = macd.get("atr")
-                        alert.last_macd_gap_percent = abs(macd["current_diff"]) / atr * 100 if atr and atr > 0 else None
-                    elif bar_time > alert.last_bar_open_time:
-                        previous_diff = alert.last_macd_diff
-                        if previous_diff is None:
-                            previous_diff = macd["previous_diff"]
-                        current_diff = macd["current_diff"]
-                        atr = macd.get("atr")
-                        current_gap_percent = abs(current_diff) / atr * 100 if atr and atr > 0 else None
-                        previous_gap_percent = alert.last_macd_gap_percent
-                        if previous_gap_percent is None and previous_diff is not None and atr and atr > 0:
-                            previous_gap_percent = abs(previous_diff) / atr * 100
-                        hit = _crossed(alert.condition, previous_diff, current_diff)
-                        alert.last_bar_open_time = bar_time
-                        alert.last_observed_value = macd["close"]
-                        thresholds, warning_state = _macd_approach_thresholds(
-                            previous_diff, current_diff, previous_gap_percent, current_gap_percent, alert.condition,
-                            alert.last_macd_warning_threshold,
-                        )
-                        alert.last_macd_warning_threshold = warning_state
-                        alert.last_macd_diff = current_diff
-                        alert.last_macd_gap_percent = current_gap_percent
-                        # Filter thresholds based on enabled flags
-                        enabled_thresholds = []
-                        if alert.macd_threshold_5 and 5 in thresholds:
-                            enabled_thresholds.append(5)
-                        if alert.macd_threshold_10 and 10 in thresholds:
-                            enabled_thresholds.append(10)
-                        for threshold in enabled_thresholds:
-                            status = "bullish" if current_diff < 0 else "bearish"
-                            title = f"{alert.symbol}({alert.timeframe}) MACD {threshold}% Approach"
-                            alert_fired.append(TriggerEvent.objects.create(
-                                alert=alert,
-                                symbol=alert.symbol,
-                                title=title,
-                                message=_macd_alert_message(
-                                    alert, macd, status=status, rsi=rsi, trend=trend,
-                                    distance=current_gap_percent, subject=title,
-                                ),
-                                observed_value=macd["close"],
-                            ))
-                        if hit and _may_fire(alert, now):
-                            status = "bullish" if macd["current_diff"] > 0 else "bearish"
-                            title = f"{alert.symbol}({alert.timeframe}) MACD Crossed"
-                            event = TriggerEvent.objects.create(
-                                alert=alert,
-                                symbol=alert.symbol,
-                                title=title,
-                                message=_macd_alert_message(
-                                    alert, macd, status=status, rsi=rsi, trend=trend, subject=title,
-                                ),
-                                observed_value=macd["close"],
-                            )
                 elif alert.kind == Alert.Kind.RSI:
                     bar_time = rsi["bar_time"]
                     rsi_value = rsi["rsi"]
@@ -697,7 +435,6 @@ def check_alerts(*, stdout=None):
                     alert_fired.append(event)
                 alert.save(update_fields=[
                     "active", "last_triggered_at", "last_observed_value", "last_bar_open_time",
-                    "last_macd_diff", "last_macd_gap_percent", "last_macd_warning_threshold",
                     "last_rsi_value", "updated_at"
                 ])
         except Exception:

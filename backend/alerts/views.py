@@ -460,7 +460,7 @@ class EngineRunView(APIView):
         summary="Run an engine job now",
         description=(
             "Runs one scheduler polling job immediately and returns the text it would have "
-            "written to stdout. Price, MACD and event checks call the exchange and "
+            "written to stdout. Price, RSI and event checks call the exchange and "
             "CoinMarketCal coin pages, so the request can take a while."
         ),
         request=EngineRunRequestSerializer,
