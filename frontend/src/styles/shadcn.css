@@ -197,10 +197,32 @@ footer {
 }
 
 /* The chart column width is drag-resizable; --chart-col only applies while the
-   workspace keeps its wide two-column layout. */
+   workspace keeps its wide two-column layout. The side column defaults to a
+   quarter of the screen and stretches so ANNOTATE's bottom tracks the chart's. */
 @media (min-width: 1261px) {
   .workspace-grid {
-    grid-template-columns: var(--chart-col, minmax(0, 2fr)) minmax(0, 1fr);
+    grid-template-columns: var(--chart-col, minmax(0, 3fr)) minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .workspace-side {
+    grid-template-rows: auto minmax(10rem, 1fr);
+    min-height: 0;
+  }
+
+  .workspace-side > .panel {
+    min-height: 0;
+  }
+
+  #annotate {
+    display: flex;
+    flex-direction: column;
+  }
+
+  #annotate-panel {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
   }
 }
 
