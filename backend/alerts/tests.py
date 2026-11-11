@@ -2222,6 +2222,16 @@ class TrendBiasParityTests(SimpleTestCase):
 
         self.assertEqual(find_trend_bias(bars, "1h", now), find_trend_bias([*bars, live], "1h", now))
 
+    def test_bar_times_may_be_datetimes_and_rows_may_be_unsorted(self):
+        bars = swing_rising_bars()
+        shuffled = [
+            {**bar, "time": utc_datetime.fromtimestamp(bar["time"], tz=dt_timezone.utc)}
+            for bar in bars[::-1]
+        ]
+        now = swing_now(bars)
+
+        self.assertEqual(find_trend_bias(shuffled, "1h", now), find_trend_bias(bars, "1h", now))
+
     def test_insufficient_history_returns_none(self):
         bars = swing_zigzag([[0, 100], [5, 110], [10, 105], [15, 120]])
         self.assertIsNone(find_trend_bias(bars, "1h", bars[-1]["time"] + SWING_HOUR))

@@ -7,17 +7,14 @@ line's price at the candle timestamp. Prior segments are historical context and
 never alert.
 """
 
+from .trend_bias import line_price
+
 
 SWING_BIAS_TIMEFRAMES = ("1h", "4h", "1d")
 SWING_BIAS_BARS = 320
 SWING_DETECTION_BARS = 1000
 
 _KIND_LABELS = {"high": "upper", "low": "lower"}
-
-
-def line_price(line, timestamp):
-    """Price on a trend-bias line at an epoch-second timestamp."""
-    return line["p1"] + line["slope"] * (timestamp - line["t1"])
 
 
 def touches_for_bar(bar, biases):
