@@ -137,6 +137,13 @@
 }
 
 @media (max-width: 650px) {
+  .chart-control-grid > .indicator-row,
+  .chart-control-grid > .drawing-row,
+  .chart-control-grid > .pattern-row,
+  .chart-control-grid > .monitor-row {
+    padding-inline: 1rem;
+  }
+
   .chart-tools {
     flex-wrap: wrap;
     width: 100%;

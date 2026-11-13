@@ -1244,7 +1244,7 @@ footer {
 }
 
 .chart-stage {
-  padding: 0 1.25rem 1rem;
+  padding: 0 1.25rem;
 }
 
 .chart-container,
@@ -1315,12 +1315,14 @@ footer {
 
 .chart-control-grid > .indicator-row,
 .chart-control-grid > .drawing-row {
+  padding: 0.5rem 1.25rem;
   border-right-color: hsl(var(--border));
   border-bottom-color: hsl(var(--border));
 }
 
 .chart-control-grid > .pattern-row,
 .chart-control-grid > .monitor-row {
+  padding: 0.5rem 1.25rem;
   border-bottom-color: hsl(var(--border));
 }
 
