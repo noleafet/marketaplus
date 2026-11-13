@@ -1,3 +1,4 @@
+import { EmptyState } from "@/components/ui/empty-state";
 import { lineValue } from "@/lib/chart";
 import { fmt } from "@/lib/format";
 import type { Drawing, LineAlert } from "@/types/market";
@@ -35,9 +36,9 @@ export default function DrawingsList({
 }: Props) {
   if (!drawings.length) {
     return (
-      <p className="empty workspace-empty">
+      <EmptyState className="workspace-empty">
         Choose a drawing tool above, then click the chart to place it.
-      </p>
+      </EmptyState>
     );
   }
   return (

@@ -10,7 +10,7 @@ import { hitTestDrawings, copyWindowSoon, drawingCoordinate, type ScreenLine } f
 import { candleTimeLabel, fmt, idFor, pricePrecision } from "@/lib/format";
 import {
   CANDLE_PANE_TOP, CHART_REFRESH_MS, INITIAL_VISIBLE_BARS,
-  TRAILING_BARS, defaultPreferences, intervalSeconds, palettes,
+  TRAILING_BARS, chartPalette, defaultPreferences, intervalSeconds,
 } from "@/lib/market/constants";
 import { closedBars, liveBarIndex, mergeBars } from "@/lib/market/candles";
 import { heikinAshi, indicatorPoints, barIndexForLogical } from "@/lib/market/indicators";
@@ -98,7 +98,7 @@ export default function MarketChart({
   dayChange: dayChangeOverride, onChartInfo, onShowAnnotateTab, onShotsChanged, handleRef,
 }: MarketChartProps) {
   const host = useRef<HTMLDivElement>(null);
-  const colors = palettes[theme];
+  const colors = chartPalette(theme);
   const macdHost = useRef<HTMLDivElement>(null);
   const rsiHost = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -344,7 +344,7 @@ export default function MarketChart({
     chart.priceScale("volume").applyOptions({ scaleMargins: { top: CANDLE_PANE_TOP, bottom: 0 } });
     // Two EMAs: a medium and a long trend, each with its own colour.
     const ema100Series = chart.addLineSeries({ color: colors.amber, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
-    const ema200Series = chart.addLineSeries({ color: "#a06fb8", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    const ema200Series = chart.addLineSeries({ color: colors.purple, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     // Bollinger Bands sit on the price pane: a solid middle SMA with dashed outer bands.
     const bbMiddleSeries = chart.addLineSeries({ color: colors.blue, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     const bbUpperSeries = chart.addLineSeries({ color: colors.blue, lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
@@ -619,7 +619,7 @@ export default function MarketChart({
       bbMiddleSeries.applyOptions({ priceFormat });
       bbLowerSeries.applyOptions({ priceFormat });
       candles.setData(preferencesRef.current.candleType === "ha" ? heikinAshi(data) : data);
-      volume.setData(data.map((bar) => ({ time: bar.time, value: bar.volume, color: bar.close >= bar.open ? "rgba(77,148,104,.28)" : "rgba(191,102,88,.28)" })));
+      volume.setData(data.map((bar) => ({ time: bar.time, value: bar.volume, color: bar.close >= bar.open ? colors.volumeUp : colors.volumeDown })));
       if (data.at(-1)) setQuote(data.at(-1)!.close);
       equalizePriceScales();
     }
@@ -752,7 +752,7 @@ export default function MarketChart({
     if (!chart || !macdChart || !rsiChart || !current || !macd || !rsiPane) return;
     const data = bars;
     current.candles.setData(preferences.candleType === "ha" ? heikinAshi(data) : data);
-    current.volume.setData(preferences.indicators.vol ? data.map((bar) => ({ time: bar.time, value: bar.volume, color: bar.close >= bar.open ? "rgba(77,148,104,.28)" : "rgba(191,102,88,.28)" })) : []);
+    current.volume.setData(preferences.indicators.vol ? data.map((bar) => ({ time: bar.time, value: bar.volume, color: bar.close >= bar.open ? colors.volumeUp : colors.volumeDown })) : []);
     // One shared calculation feeds the panes, the legend and the crosshair values.
     const { rsi: rsiValues, macd: macdAll } = indicatorSet;
     indicatorValues.current = { rsi: rsiValues, macd: macdAll };
@@ -806,7 +806,7 @@ export default function MarketChart({
     macd.histogram.setData(data.flatMap((bar, index) => macdAll.histogram[index] === null ? [] : [{
       time: bar.time,
       value: macdAll.histogram[index]!,
-      color: macdAll.line[index]! >= macdAll.signal[index]! ? "rgba(77,148,104,.65)" : "rgba(191,102,88,.65)",
+      color: macdAll.line[index]! >= macdAll.signal[index]! ? colors.macdUp : colors.macdDown,
     }]));
     macd.line.setData(indicatorPoints(data, macdAll.line));
     macd.signal.setData(indicatorPoints(data, macdAll.signal));

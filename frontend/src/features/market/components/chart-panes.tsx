@@ -99,7 +99,7 @@ export default function ChartPanes({
         : "bearish";
 
   return (
-    <>
+    <div className="chart-stage">
       <div className="chart-area workspace-chart-area">
         <div ref={host} className="chart-container workspace-chart" />
         <canvas
@@ -175,6 +175,6 @@ export default function ChartPanes({
           patternDetail || null,
         ].filter(Boolean).join(" · ") || "\u00a0"}
       </p>
-    </>
+    </div>
   );
 }

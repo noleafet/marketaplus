@@ -1,4 +1,5 @@
 import { messageWithoutReport, reportUrlFromMessage } from "@/lib/alerts";
+import { PanelHeader } from "@/components/ui/panel-header";
 import type { EventItem } from "@/types/alerts";
 
 type Props = {
@@ -13,18 +14,18 @@ export default function ActivityLog({ events, clearedThrough, onClear }: Props) 
     .slice(0, 20);
   return (
     <section className="panel activity-panel" id="activity">
-      <div className="panel-head">
-        <div>
-          <p className="eyebrow">ACTIVITY</p>
-          <h2>Triggered</h2>
-        </div>
-        <div className="panel-actions">
-          <span className="count">{events.length} EVENTS</span>
-          <button className="refresh" onClick={onClear}>
-            Clear log
-          </button>
-        </div>
-      </div>
+      <PanelHeader
+        eyebrow="ACTIVITY"
+        title="Triggered"
+        actions={
+          <div className="panel-actions">
+            <span className="count">{events.length} EVENTS</span>
+            <button type="button" className="refresh" onClick={onClear}>
+              Clear log
+            </button>
+          </div>
+        }
+      />
       {visible.length ? (
         <div className="event-list">
           {visible.map((event) => {

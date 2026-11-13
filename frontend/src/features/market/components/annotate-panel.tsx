@@ -1,4 +1,5 @@
 import type { RefObject } from "react";
+import { PanelHeader } from "@/components/ui/panel-header";
 import TradeCalculator from "@/features/calculator/trade-calculator";
 import CandlestickPictures from "@/features/candlesticks/components/candlestick-pictures";
 import PatternPictures from "@/features/patterns/components/pattern-pictures";
@@ -103,13 +104,7 @@ export default function AnnotatePanel({
 
   return (
     <section className="panel workspace-panel" id="annotate">
-      <div className="panel-head">
-        <div>
-          <p className="eyebrow">ANNOTATE</p>
-          <h2>{titleFor(tab)}</h2>
-        </div>
-        <span className="count">{count}</span>
-      </div>
+      <PanelHeader eyebrow="ANNOTATE" title={titleFor(tab)} actions={<span className="count">{count}</span>} />
       <div className="annotate-tabs" role="tablist" aria-label="Annotation views">
         <button
           type="button"

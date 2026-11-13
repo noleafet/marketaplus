@@ -1,4 +1,5 @@
 import type { FormEvent } from "react";
+import { PanelHeader } from "@/components/ui/panel-header";
 import type { AlertKind, RecoveryTrigger } from "@/types/alerts";
 import { conditions, recoveryTriggers, timeframes } from "../constants";
 
@@ -48,24 +49,22 @@ export default function AlertForm({ model, onSubmit }: Props) {
 
   return (
     <section className="panel create-panel" id="create-alert">
-      <div className="panel-head">
-        <div>
-          <p className="eyebrow">CONFIGURE</p>
-          <h2>Create an alert</h2>
-        </div>
-        <span className="step">01 / 02</span>
-      </div>
+      <PanelHeader
+        eyebrow="CONFIGURE"
+        title="Create an alert"
+        actions={<span className="step">01 / 02</span>}
+      />
       <div className="kind-switch">
-        <button className={kind === "price" ? "selected" : ""} onClick={() => onKindChange("price")}>
+        <button type="button" className={kind === "price" ? "selected" : ""} aria-pressed={kind === "price"} onClick={() => onKindChange("price")}>
           Price level
         </button>
-        <button className={kind === "trend_recovery" ? "selected" : ""} onClick={() => onKindChange("trend_recovery")}>
+        <button type="button" className={kind === "trend_recovery" ? "selected" : ""} aria-pressed={kind === "trend_recovery"} onClick={() => onKindChange("trend_recovery")}>
           Trend Recovery
         </button>
-        <button className={kind === "swing_detection" ? "selected" : ""} onClick={() => onKindChange("swing_detection")}>
+        <button type="button" className={kind === "swing_detection" ? "selected" : ""} aria-pressed={kind === "swing_detection"} onClick={() => onKindChange("swing_detection")}>
           Swing detection
         </button>
-        <button className={kind === "pattern" ? "selected" : ""} onClick={() => onKindChange("pattern")}>
+        <button type="button" className={kind === "pattern" ? "selected" : ""} aria-pressed={kind === "pattern"} onClick={() => onKindChange("pattern")}>
           Pattern forming
         </button>
       </div>
@@ -215,7 +214,7 @@ export default function AlertForm({ model, onSubmit }: Props) {
             placeholder="Add a reminder for this alert"
           />
         </label>
-        <button className="submit wide" disabled={busy}>
+        <button type="submit" className="submit wide" disabled={busy}>
           {busy ? "Saving…" : "Save alert"}
           <span>↗</span>
         </button>

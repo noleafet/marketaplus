@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import "@/styles/globals.css";
 import "@/styles/chart.css";
-import "@/styles/responsive.css";
+import "@/styles/workspace.css";
 import "@/styles/report.css";
 import "@/styles/shadcn.css";
+import "@/styles/responsive.css";
 import "@/styles/tailwind.css";
 
 export const metadata: Metadata = {

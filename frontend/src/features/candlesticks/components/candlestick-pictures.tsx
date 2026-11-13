@@ -1,4 +1,6 @@
 import type { RefObject } from "react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Notice } from "@/components/ui/notice";
 import { proxied } from "@/lib/api/client";
 import { KEPT_PER_SYMBOL } from "@/lib/market/constants";
 import type { PatternShot } from "@/types/market";
@@ -30,16 +32,12 @@ export default function CandlestickPictures({
 }: Props) {
   return (
     <div className="pattern-shots">
-      {notice && (
-        <p className="watch-notice" role="status">
-          {notice}
-        </p>
-      )}
+      {notice && <Notice>{notice}</Notice>}
       {!order.length && !notice && (
-        <p className="empty workspace-empty">
+        <EmptyState className="workspace-empty">
           No candlestick pictures yet. Use the picture button in the candlestick monitor; the
           server keeps the newest {KEPT_PER_SYMBOL} for every pair on the watchlist.
-        </p>
+        </EmptyState>
       )}
       {order.map((pair) => (
         <section className="pattern-group" key={pair}>

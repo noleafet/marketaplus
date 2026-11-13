@@ -23,6 +23,7 @@ export default function DrawingToolbar({
       {drawingTools.map((item) => (
         <button
           key={item}
+          type="button"
           aria-pressed={tool === item}
           className={tool === item ? "active" : ""}
           title={`${item} (${toolKey(item)})`}

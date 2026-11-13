@@ -68,6 +68,9 @@ const config: Config = {
         },
         bullish: "hsl(var(--bullish))",
         bearish: "hsl(var(--bearish))",
+        warning: "hsl(var(--warning))",
+        caution: "hsl(var(--caution))",
+        info: "hsl(var(--chart-1))",
       },
       borderRadius: {
         xl: "calc(var(--radius) + 4px)",

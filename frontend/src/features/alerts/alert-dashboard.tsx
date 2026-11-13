@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api, readableError } from "@/lib/api/client";
+import { Notice } from "@/components/ui/notice";
 import { reportUrlFromMessage, messageWithoutReport } from "@/lib/alerts";
 import MarketWorkspace from "@/features/market/market-workspace";
 import AppSidebar from "@/components/layout/app-sidebar";
@@ -335,11 +336,11 @@ export default function AlertDashboard() {
             />
 
             {error && (
-              <div className="notice" role="alert">
+              <Notice tone="alert">
                 <b>Connection or validation issue</b>
                 <span>{error}</span>
-                <button onClick={() => void refresh()}>Retry</button>
-              </div>
+                <button type="button" onClick={() => void refresh()}>Retry</button>
+              </Notice>
             )}
 
             <section className="alerts-group" aria-label="Alerts">

@@ -1,4 +1,6 @@
 import type { FormEvent } from "react";
+import { Notice } from "@/components/ui/notice";
+import { PanelHeader } from "@/components/ui/panel-header";
 import { fmt } from "@/lib/format";
 import type { Timeframe, WatchMetrics, WatchReading } from "@/types/market";
 
@@ -134,17 +136,15 @@ export default function WatchlistPanel({
 
   return (
     <section className="panel workspace-panel">
-      <div className="panel-head">
-        <div>
-          <p className="eyebrow">MARKETS</p>
-          <h2>Watchlist</h2>
-        </div>
-        <span className="count">{watchlist.length} PAIRS</span>
-      </div>
+      <PanelHeader
+        eyebrow="MARKETS"
+        title="Watchlist"
+        actions={<span className="count">{watchlist.length} PAIRS</span>}
+      />
       {stale && (
-        <p className="watch-stale" role="status">
+        <Notice tone="stale">
           Quote refresh failed · showing the last known prices
-        </p>
+        </Notice>
       )}
       {watchlist.length > 0 && (
         <div className="watch-table">
@@ -185,7 +185,7 @@ export default function WatchlistPanel({
                   >
                     #
                   </button>
-                  <button className="watch-pair" onClick={() => onSelect(pair)}>
+                  <button type="button" className="watch-pair" onClick={() => onSelect(pair)}>
                     {pair}
                   </button>
                   <span>{fmt(quote?.price ?? null)}</span>
@@ -215,6 +215,7 @@ export default function WatchlistPanel({
                     : ""}
                   {on ? oiReading(metric?.oi) : ""}
                   <button
+                    type="button"
                     className="remove-watch"
                     disabled={!loaded}
                     aria-label={`Remove ${pair}`}
@@ -247,7 +248,7 @@ export default function WatchlistPanel({
           Add
         </button>
       </form>
-      {notice && <p className="watch-notice" role="status">{notice}</p>}
+      {notice && <Notice>{notice}</Notice>}
     </section>
   );
 }

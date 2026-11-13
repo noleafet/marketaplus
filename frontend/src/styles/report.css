@@ -256,14 +256,14 @@
   background: color-mix(in srgb, var(--bg) 55%, var(--paper));
 }
 
-.report-plan.suggested {
-  border-color: var(--green);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 28%, transparent);
+.report-plan.long.suggested {
+  border-color: hsl(var(--bullish));
+  box-shadow: inset 0 0 0 1px hsl(var(--bullish) / 0.25);
 }
 
 .report-plan.short.suggested {
-  border-color: var(--red);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 28%, transparent);
+  border-color: hsl(var(--bearish));
+  box-shadow: inset 0 0 0 1px hsl(var(--bearish) / 0.25);
 }
 
 .report-plan header {

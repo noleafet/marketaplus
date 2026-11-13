@@ -265,6 +265,8 @@ footer {
 }
 
 .notice {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
   margin: 0;
@@ -357,8 +359,23 @@ footer {
 .pattern-shot-actions button:focus-visible,
 .modal-close:focus-visible,
 .calculator-live button:focus-visible,
+.calculator-draw:focus-visible,
 .submit:focus-visible,
-.watch-add button:focus-visible {
+.watch-add button:focus-visible,
+.kind-switch button:focus-visible,
+.timeframes button:focus-visible,
+.mode-switch button:focus-visible,
+.indicator-chip:focus-visible,
+.watch-toggle:focus-visible,
+.watch-pair:focus-visible,
+.remove-watch:focus-visible,
+.status-toggle:focus-visible,
+.delete:focus-visible,
+.annotate-tabs button:focus-visible,
+.report-entry-tabs button:focus-visible,
+.chart-tab-name:focus-visible,
+.chart-tab-close:focus-visible,
+.toast-stack button:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring) / 0.35);
 }
@@ -1226,8 +1243,8 @@ footer {
   background: hsl(var(--secondary) / 0.8);
 }
 
-.chart-area {
-  border-top: 1px solid hsl(var(--border));
+.chart-stage {
+  padding: 0 1.25rem 1rem;
 }
 
 .chart-container,
@@ -1750,7 +1767,7 @@ footer {
 .alert-toast {
   padding: 0.875rem 2.5rem 0.875rem 1rem;
   border: 1px solid hsl(var(--border));
-  border-left: 3px solid hsl(var(--amber));
+  border-left: 3px solid hsl(var(--warning));
   border-radius: calc(var(--radius) - 2px);
   background: hsl(var(--background));
   color: hsl(var(--foreground));
@@ -1798,18 +1815,18 @@ footer {
 }
 
 .market-event-impact.impact-critical {
-  background: #fee2e2;
-  color: #b91c1c;
+  background: hsl(var(--destructive) / 0.12);
+  color: hsl(var(--destructive));
 }
 
 .market-event-impact.impact-high {
-  background: #ffedd5;
-  color: #c2410c;
+  background: hsl(var(--caution) / 0.14);
+  color: hsl(var(--caution));
 }
 
 .market-event-impact.impact-mid {
-  background: hsl(var(--amber) / 0.14);
-  color: hsl(var(--amber));
+  background: hsl(var(--warning) / 0.14);
+  color: hsl(var(--warning));
 }
 
 .market-event-impact.impact-low,
@@ -2030,6 +2047,14 @@ footer {
 @media (max-width: 650px) {
   .market-head {
     padding: 0.875rem 1rem 0.5rem;
+  }
+
+  .chart-tabs {
+    padding-inline: 1rem;
+  }
+
+  .chart-stage {
+    padding-inline: 1rem;
   }
 
   .chart-tools {

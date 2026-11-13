@@ -36,6 +36,7 @@ export function IndicatorControls({
     <div className="control-row indicator-row">
       <div className="mode-switch">
         <button
+          type="button"
           aria-pressed={preferences.candleType === "candles"}
           className={preferences.candleType === "candles" ? "chosen" : ""}
           onClick={() => onChange({ candleType: "candles" })}
@@ -43,6 +44,7 @@ export function IndicatorControls({
           Candles
         </button>
         <button
+          type="button"
           aria-pressed={preferences.candleType === "ha"}
           className={preferences.candleType === "ha" ? "chosen" : ""}
           onClick={() => onChange({ candleType: "ha" })}
@@ -52,6 +54,7 @@ export function IndicatorControls({
       </div>
       {indicatorChips.map(([key, label]) => (
         <button
+          type="button"
           aria-pressed={preferences.indicators[key]}
           className={`indicator-chip ${preferences.indicators[key] ? "active" : ""}`}
           key={key}

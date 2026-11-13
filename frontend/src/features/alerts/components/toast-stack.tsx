@@ -14,6 +14,7 @@ export default function ToastStack({ toasts, onDismiss }: Props) {
         return (
           <div className="alert-toast" key={item.id}>
             <button
+              type="button"
               aria-label="Dismiss notification"
               onClick={() => onDismiss(item.id)}
             >

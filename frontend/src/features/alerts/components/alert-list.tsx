@@ -1,3 +1,5 @@
+import { EmptyState } from "@/components/ui/empty-state";
+import { PanelHeader } from "@/components/ui/panel-header";
 import type { AlertItem } from "@/types/alerts";
 import { conditions, patternLabels, recoveryTriggers } from "../constants";
 
@@ -34,28 +36,30 @@ export default function AlertList({
 }: Props) {
   return (
     <section className="panel list-panel" id="alerts">
-      <div className="panel-head">
-        <div>
-          <p className="eyebrow">MONITOR</p>
-          <h2>Your alerts</h2>
-        </div>
-        <div className="panel-actions">
-          {notificationAvailable && !notificationsGranted && alerts.length > 0 && (
-            <button className="refresh" onClick={onEnableNotifications}>
-              Enable notifications
+      <PanelHeader
+        eyebrow="MONITOR"
+        title="Your alerts"
+        actions={
+          <div className="panel-actions">
+            {notificationAvailable && !notificationsGranted && alerts.length > 0 && (
+              <button type="button" className="refresh" onClick={onEnableNotifications}>
+                Enable notifications
+              </button>
+            )}
+            <button type="button" className="refresh" onClick={onRefresh} disabled={refreshing}>
+              {refreshing ? "Syncing…" : "↻ Refresh"}
             </button>
-          )}
-          <button className="refresh" onClick={onRefresh} disabled={refreshing}>
-            {refreshing ? "Syncing…" : "↻ Refresh"}
-          </button>
-        </div>
-      </div>
+          </div>
+        }
+      />
       {alerts.length ? (
         <div className="alert-list">
           {alerts.map((item) => (
             <article className={`alert-row ${item.active ? "" : "muted"}`} key={item.id}>
               <button
+                type="button"
                 aria-label={item.active ? "Pause alert" : "Enable alert"}
+                aria-pressed={item.active}
                 className={`status-toggle ${item.active ? "enabled" : ""}`}
                 onClick={() => onToggle(item)}
               >
@@ -94,6 +98,7 @@ export default function AlertList({
                 </small>
               </div>
               <button
+                type="button"
                 className="delete"
                 aria-label={`Delete ${item.symbol} alert`}
                 onClick={() => onDelete(item.id)}
@@ -104,11 +109,9 @@ export default function AlertList({
           ))}
         </div>
       ) : (
-        <div className="empty">
-          <span>◷</span>
-          <b>No alerts yet</b>
-          <p>Your active conditions will appear here.</p>
-        </div>
+        <EmptyState icon="◷" title="No alerts yet">
+          Your active conditions will appear here.
+        </EmptyState>
       )}
     </section>
   );

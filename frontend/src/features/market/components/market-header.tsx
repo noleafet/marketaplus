@@ -70,6 +70,7 @@ export default function MarketHeader({
           {intervals.map((interval) => (
             <button
               key={interval}
+              type="button"
               aria-pressed={timeframe === interval}
               className={timeframe === interval ? "chosen" : ""}
               onClick={() => onTimeframeChange(interval)}
